@@ -54,10 +54,20 @@ data class Person(
     val location: LocationState,
     val action: ActionState,
     val lastDecision: DecisionRecord?,
+    /** What this person believes to be true — their non-omniscient picture of the hotel. */
+    val knowledge: KnowledgeBase = KnowledgeBase.EMPTY,
+    /** How they stand toward everyone they know, across every relationship dimension. */
+    val relationships: Relationships = Relationships.EMPTY,
+    /** Their current, fading emotional weather. */
+    val emotions: EmotionState = EmotionState.CALM,
 ) {
     val name: String get() = identity.name
 
-    /** How this person currently feels about [other], from remembered moments. */
+    /**
+     * How this person currently feels about [other], from remembered moments.
+     * Kept as the memory-derived signal used since Phase 3; the multidimensional
+     * [relationships] give the fuller, per-axis picture.
+     */
     fun sentimentToward(other: PersonId): Double =
         memories.filter { it.subjectId == other }.sumOf { it.sentiment() }
 }

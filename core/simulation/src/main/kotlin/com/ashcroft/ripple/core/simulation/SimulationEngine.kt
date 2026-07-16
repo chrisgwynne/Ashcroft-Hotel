@@ -5,15 +5,20 @@ import com.ashcroft.ripple.core.model.ActionPhase
 import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.ActivityKind
+import com.ashcroft.ripple.core.model.Belief
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.DeterministicRandom
+import com.ashcroft.ripple.core.model.EmotionKind
+import com.ashcroft.ripple.core.model.FactTopic
 import com.ashcroft.ripple.core.model.HotelLayout
+import com.ashcroft.ripple.core.model.InformationSource
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
 import com.ashcroft.ripple.core.model.NeedKind
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
+import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.SimTime
 import com.ashcroft.ripple.core.model.TraitKind
 import com.ashcroft.ripple.core.world.AshcroftNav
@@ -40,7 +45,7 @@ class SimulationEngine(
         val world = HotelWorldQueries(layout, graph, locator, state.people)
         val decider = DecisionMaker(world)
 
-        val advanced = state.people.map { advance(it, world, decider, state.seed, now) }
+        val advanced = state.people.map { advance(it, state.people, world, decider, state.seed, now) }
         val byId = advanced.associate { it.person.id to it.person }.toMutableMap()
         val socials = advanced.mapNotNull { it.social }.sortedBy { it.actor.value }
         for (event in socials) resolveSocial(event, byId, state.seed, now)
@@ -59,9 +64,20 @@ class SimulationEngine(
     fun explain(state: WorldState, id: PersonId) =
         state.person(id)?.lastDecision?.let { DecisionMaker(HotelWorldQueries(layout, graph, locator, state.people)).explanationFor(it) }
 
-    private fun advance(person: Person, world: HotelWorldQueries, decider: DecisionMaker, seed: Long, now: SimTime): Advance {
+    private fun advance(
+        person: Person,
+        everyone: List<Person>,
+        world: HotelWorldQueries,
+        decider: DecisionMaker,
+        seed: Long,
+        now: SimTime,
+    ): Advance {
         val effective = effectiveActivity(person)
-        val withNeeds = person.copy(needs = NeedDynamics.tick(person.needs, effective))
+        val withNeeds = person.copy(
+            needs = NeedDynamics.tick(person.needs, effective),
+            knowledge = Perception.observe(person, everyone, now),
+            emotions = person.emotions.decayed(1),
+        )
 
         val mustDecide = withNeeds.action.phase.isTerminal || reconsider(withNeeds, now)
         if (mustDecide) {
@@ -136,15 +152,23 @@ class SimulationEngine(
             ),
         ).nextFloat()
         if (roll < willingness.coerceIn(0.05f, 0.95f)) {
+            val present = byId.values.filter { it.location.roomId == actor.location.roomId }.map { it.id }.toSet()
+            val shared = sharedBeliefs(actor, present, now)
             byId[event.actor] = actor.copy(
                 needs = actor.needs.with(NeedKind.SOCIAL, actor.needs[NeedKind.SOCIAL] + 0.12f),
                 memories = remember(actor, MemoryKind.HAD_PLEASANT_CHAT, target.id, valence = 0.6, importance = 0.5, now = now),
                 acquaintances = actor.acquaintances + target.id,
+                relationships = actor.relationships.adjust(target.id, WARMED_INITIATOR),
+                emotions = actor.emotions.stirred(mapOf(EmotionKind.HAPPINESS to 0.15, EmotionKind.LONELINESS to -0.2)),
             )
             byId[event.target] = target.copy(
                 needs = target.needs.with(NeedKind.SOCIAL, target.needs[NeedKind.SOCIAL] + 0.08f),
                 memories = remember(target, MemoryKind.HAD_PLEASANT_CHAT, actor.id, valence = 0.5, importance = 0.4, now = now),
                 acquaintances = target.acquaintances + actor.id,
+                relationships = target.relationships.adjust(actor.id, WARMED_RECIPIENT),
+                emotions = target.emotions.stirred(mapOf(EmotionKind.HAPPINESS to 0.1, EmotionKind.LONELINESS to -0.15)),
+                // The recipient picks up what the initiator mentions — second-hand, so held as rumour.
+                knowledge = shared.fold(target.knowledge) { kb, belief -> kb.learn(belief) },
             )
         } else {
             byId[event.actor] = failSocial(actor, event.target, now)
@@ -156,7 +180,42 @@ class SimulationEngine(
         action = actor.action.copy(phase = ActionPhase.FAILED),
         memories = remember(actor, MemoryKind.WAS_IGNORED, target, valence = -0.5, importance = 0.5, now = now),
         behaviour = actor.behaviour.recordFailure(actor.action.signature()),
+        relationships = actor.relationships.adjust(target, REBUFFED),
+        emotions = actor.emotions.stirred(
+            mapOf(EmotionKind.EMBARRASSMENT to 0.2, EmotionKind.FRUSTRATION to 0.12, EmotionKind.LONELINESS to 0.05),
+        ),
     )
+
+    /**
+     * The single belief the initiator brings up — news the listener probably
+     * cannot see for themselves: a notable arrival if they know of one, else
+     * something about a person or place *not* in the room. The recipient takes it
+     * on at reduced confidence, so a stale or mistaken belief spreads as a rumour.
+     */
+    private fun sharedBeliefs(actor: Person, present: Set<PersonId>, now: SimTime): List<Belief> {
+        val elsewhere = actor.knowledge.all.filter { belief ->
+            when (val topic = belief.claim.topic) {
+                is FactTopic.NotableGuest -> true
+                is FactTopic.Whereabouts -> topic.person !in present
+                is FactTopic.PersonMood -> topic.person !in present
+                is FactTopic.RoomOccupancy -> topic.room != actor.location.roomId
+            }
+        }
+        // Lead with any notable arrival, then the things they are most sure of.
+        val picks = (
+            elsewhere.filter { it.claim.topic is FactTopic.NotableGuest } +
+                elsewhere.sortedByDescending { it.confidence }
+        ).distinctBy { it.topicKey }.take(SHARE_LIMIT)
+        return picks.map { pick ->
+            Belief(
+                claim = pick.claim,
+                confidence = (pick.confidence * HEARSAY_DECAY).coerceIn(0.0, 1.0),
+                source = InformationSource.CONVERSATION,
+                acquiredAt = now,
+                fromPerson = actor.id,
+            )
+        }
+    }
 
     private fun recipientWillingness(target: Person, actor: Person): Float {
         val base = target.personality[TraitKind.SOCIABILITY] * 0.5f
@@ -164,7 +223,8 @@ class SimulationEngine(
         val busy = if (target.action.verb == ActionVerb.WORK && target.schedule.any { it.kind == CommitmentKind.SHIFT }) -0.25f else 0f
         val sentiment = target.sentimentToward(actor.id).coerceIn(-0.5, 0.5).toFloat() * 0.3f
         val known = if (target.acquaintances.contains(actor.id)) 0.1f else 0f
-        return base + loneliness + busy + sentiment + known
+        val warmth = target.relationships.with(actor.id).warmth().coerceIn(-0.5, 0.5).toFloat() * 0.2f
+        return base + loneliness + busy + sentiment + known + warmth
     }
 
     private fun remember(
@@ -217,5 +277,23 @@ class SimulationEngine(
     private companion object {
         const val URGENT_FLOOR = 0.12f
         const val MAX_MEMORIES = 40
+        const val HEARSAY_DECAY = 0.6
+        const val SHARE_LIMIT = 2
+
+        // A good exchange warms several axes at once — never a single friendship score.
+        val WARMED_INITIATOR = mapOf(
+            RelationDimension.FAMILIARITY to 0.06,
+            RelationDimension.AFFECTION to 0.04,
+            RelationDimension.TRUST to 0.02,
+        )
+        val WARMED_RECIPIENT = mapOf(
+            RelationDimension.FAMILIARITY to 0.06,
+            RelationDimension.AFFECTION to 0.03,
+            RelationDimension.TRUST to 0.015,
+        )
+        val REBUFFED = mapOf(
+            RelationDimension.FAMILIARITY to 0.02,
+            RelationDimension.RESENTMENT to 0.05,
+        )
     }
 }
