@@ -78,6 +78,7 @@ class ExplanationBuilder(
             ActionVerb.CONVERSE -> "Talking with $who"
             ActionVerb.WANDER -> "Wandering"
             ActionVerb.WAIT -> "Waiting"
+            ActionVerb.ATTEND -> if (where != null) "Attending to work at $where" else "Attending to a task"
         }
     }
 }

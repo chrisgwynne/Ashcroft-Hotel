@@ -1,7 +1,9 @@
 package com.ashcroft.ripple.core.simulation
 
+import com.ashcroft.ripple.core.decision.TaskOffer
 import com.ashcroft.ripple.core.decision.WorldQueries
 import com.ashcroft.ripple.core.model.HotelLayout
+import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoomId
@@ -21,6 +23,7 @@ class HotelWorldQueries(
     private val graph: NavGraph,
     private val locator: RoomLocator,
     people: List<Person>,
+    private val tasks: List<HotelTask> = emptyList(),
 ) : WorldQueries {
     private val peopleById: Map<PersonId, Person> = people.associateBy { it.id }
     private val byRoom: Map<RoomId, List<PersonId>> =
@@ -49,6 +52,18 @@ class HotelWorldQueries(
     override fun peopleInRoom(room: RoomId): List<PersonId> = byRoom[room] ?: emptyList()
 
     override fun person(id: PersonId): Person? = peopleById[id]
+
+    override fun openTasksFor(actor: Person): List<TaskOffer> {
+        if (!actor.role.isStaff) return emptyList()
+        return tasks.asSequence()
+            .filter { it.isOpen && actor.role in it.requiredRoles && (it.assignedTo == null || it.assignedTo == actor.id) }
+            .filter { canAccess(actor, it.locationId) && travelMinutes(actor.location.pos, it.locationId) != null }
+            .map { TaskOffer(it.id, it.locationId, taskLabel(it.type), it.priority, it.type.guestFacing, it.department) }
+            .toList()
+    }
+
+    private fun taskLabel(type: com.ashcroft.ripple.core.model.HotelTaskType): String =
+        type.name.lowercase().replace('_', ' ')
 
     private companion object {
         val STAFF_ONLY = setOf(

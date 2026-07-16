@@ -36,7 +36,8 @@ class DecisionMaker(private val world: WorldQueries) {
         val currentRoom = actor.location.roomId
         val perceived = perceive(actor, currentRoom)
         val opportunities = candidateProvider.knownOpportunities(actor, activeCommitments)
-        val candidates = candidateProvider.candidates(actor, currentRoom, perceived, opportunities)
+        val openTasks = world.openTasksFor(actor)
+        val candidates = candidateProvider.candidates(actor, currentRoom, perceived, opportunities, openTasks)
 
         val context = DecisionContext(
             actor = actor,
@@ -47,6 +48,7 @@ class DecisionMaker(private val world: WorldQueries) {
             activeCommitments = activeCommitments,
             recentMemories = actor.memories.takeLast(RECENT_MEMORY_WINDOW),
             availableActions = candidates,
+            availableTasks = openTasks,
             simTime = now,
         )
 
@@ -66,6 +68,7 @@ class DecisionMaker(private val world: WorldQueries) {
             plannedMinutes = chosen.candidate.plannedMinutes,
             elapsedMinutes = 0,
             reasonSummary = explanations.summaryLine(chosen),
+            targetTaskId = chosen.candidate.targetTaskId,
         )
         val record = DecisionRecord(
             id = DecisionId("d:${actor.id.value}:${now.epochMinutes}"),

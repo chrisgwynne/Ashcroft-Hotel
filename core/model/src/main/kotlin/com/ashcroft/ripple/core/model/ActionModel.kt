@@ -25,6 +25,10 @@ enum class ActionVerb(val effect: ActivityKind, val social: Boolean) {
     CONVERSE(ActivityKind.SOCIALISE, social = true),
     WANDER(ActivityKind.IDLE, social = false),
     WAIT(ActivityKind.IDLE, social = false),
+
+    // Phase 5 — attend to a concrete hotel task (check a guest in, clean a room,
+    // serve at the bar). Counts as work, and often puts staff and guests together.
+    ATTEND(ActivityKind.WORK, social = false),
 }
 
 /** The lifecycle a chosen action moves through. */
@@ -58,6 +62,7 @@ data class ActionState(
     val plannedMinutes: Int,
     val elapsedMinutes: Int,
     val reasonSummary: String,
+    val targetTaskId: HotelTaskId? = null,
 ) {
     fun signature(): ActionSignature = ActionSignature(verb, targetRoom, targetPerson)
 

@@ -1,6 +1,7 @@
 package com.ashcroft.ripple.core.simulation
 
 import com.ashcroft.ripple.core.model.ChronicleEntry
+import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoomId
@@ -17,6 +18,7 @@ data class WorldState(
     val clock: SimTime,
     val people: List<Person>,
     val chronicle: List<ChronicleEntry> = emptyList(),
+    val tasks: List<HotelTask> = emptyList(),
 ) {
     fun person(id: PersonId): Person? = people.firstOrNull { it.id == id }
 

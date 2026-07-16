@@ -48,6 +48,7 @@ data class ActionCandidate(
     val targetRoom: RoomId?,
     val targetPerson: PersonId?,
     val plannedMinutes: Int,
+    val targetTaskId: HotelTaskId? = null,
 ) {
     fun signature(): ActionSignature = ActionSignature(verb, targetRoom, targetPerson)
 }

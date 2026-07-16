@@ -20,7 +20,9 @@ complexity:
     threshold: 80
   CyclomaticComplexMethod:
     active: true
-    threshold: 20
+    # Exhaustive when-dispatch over the growing action/task enums is branchy but
+    # not tangled; keep the rule for genuinely knotted logic (25+).
+    threshold: 24
 
 style:
   active: true

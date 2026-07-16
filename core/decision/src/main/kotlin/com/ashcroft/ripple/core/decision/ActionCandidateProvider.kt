@@ -37,23 +37,28 @@ class ActionCandidateProvider(private val world: WorldQueries) {
         currentRoom: RoomId?,
         perceivedPeople: List<PerceivedPerson>,
         opportunities: List<KnownOpportunity>,
+        openTasks: List<TaskOffer> = emptyList(),
     ): List<ActionCandidate> {
         val out = LinkedHashMap<String, ActionCandidate>()
 
-        fun offer(verb: ActionVerb, room: RoomId?, person: com.ashcroft.ripple.core.model.PersonId?) {
+        fun offer(verb: ActionVerb, room: RoomId?, person: com.ashcroft.ripple.core.model.PersonId?, task: TaskOffer? = null) {
             if (room != null && !world.canAccess(actor, room)) return
             if (room != null && room != currentRoom && world.travelMinutes(actor.location.pos, room) == null) return
             val candidate = ActionCandidate(
-                id = ActionId("${verb.name}|${room?.value ?: ""}|${person?.value ?: ""}"),
+                id = ActionId("${verb.name}|${room?.value ?: ""}|${person?.value ?: ""}|${task?.taskId?.value ?: ""}"),
                 verb = verb,
                 targetRoom = room,
                 targetPerson = person,
-                plannedMinutes = durationFor(verb),
+                plannedMinutes = if (task != null) durationForTask(task) else durationFor(verb),
+                targetTaskId = task?.taskId,
             )
             out.putIfAbsent(candidate.id.value, candidate)
         }
 
         for (opportunity in opportunities) offer(opportunity.verb, opportunity.room, null)
+
+        // Hotel work waiting to be done — the reason staff move about and meet guests.
+        for (task in openTasks) offer(ActionVerb.ATTEND, task.room, null, task)
 
         // Social candidates only for people in the same room (perceived, not global).
         for (other in perceivedPeople) {
@@ -65,6 +70,13 @@ class ActionCandidateProvider(private val world: WorldQueries) {
         offer(ActionVerb.TAKE_BREAK, currentRoom, null)
         offer(ActionVerb.WAIT, currentRoom, null)
         return out.values.toList()
+    }
+
+    private fun durationForTask(task: TaskOffer): Int = when (task.department) {
+        com.ashcroft.ripple.core.model.Department.HOUSEKEEPING -> 35
+        com.ashcroft.ripple.core.model.Department.KITCHEN -> 25
+        com.ashcroft.ripple.core.model.Department.MANAGEMENT -> 20
+        else -> 15
     }
 
     private fun workRoom(actor: Person, activeCommitments: List<Commitment>): RoomId? {
@@ -94,5 +106,6 @@ class ActionCandidateProvider(private val world: WorldQueries) {
         ActionVerb.WANDER -> 15
         ActionVerb.WAIT -> 10
         ActionVerb.GREET -> 5
+        ActionVerb.ATTEND -> 15
     }
 }

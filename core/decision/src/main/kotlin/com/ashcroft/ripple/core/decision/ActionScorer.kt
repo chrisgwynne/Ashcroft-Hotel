@@ -31,6 +31,7 @@ class ActionScorer {
 
         needRelief(candidate, context, components)
         commitmentFulfilment(candidate, context, components)
+        taskAttendance(candidate, context, components)
         goalProgress(candidate, context, components)
         personalityFit(candidate, actor, components)
         emotionalFit(candidate, actor, components)
@@ -71,6 +72,18 @@ class ActionScorer {
         val conscientiousness = ctx.actor.personality[TraitKind.CONSCIENTIOUSNESS]
         val value = shift.strength * (0.5 + conscientiousness) * COMMITMENT_WEIGHT
         out += ScoreComponent(ScoreComponentType.COMMITMENT_FULFILMENT, value, "your shift is on")
+    }
+
+    private fun taskAttendance(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
+        if (candidate.verb != ActionVerb.ATTEND) return
+        val task = ctx.availableTasks.firstOrNull { it.taskId == candidate.targetTaskId } ?: return
+        val conscientiousness = ctx.actor.personality[TraitKind.CONSCIENTIOUSNESS]
+        val onShift = ctx.activeCommitments.any { it.kind == CommitmentKind.SHIFT }
+        var value = task.priority * (0.5 + conscientiousness) * TASK_WEIGHT
+        if (onShift) value += TASK_ON_SHIFT
+        // A sociable member of staff finds guest-facing work a little more appealing.
+        if (task.guestFacing) value += ctx.actor.personality[TraitKind.SOCIABILITY] * TASK_GUEST_FACING
+        out += ScoreComponent(ScoreComponentType.COMMITMENT_FULFILMENT, value, "there is a guest or job waiting")
     }
 
     private fun goalProgress(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
@@ -190,7 +203,7 @@ class ActionScorer {
 
     private fun commitmentConflict(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
         val shift = ctx.activeCommitments.firstOrNull { it.kind == CommitmentKind.SHIFT } ?: return
-        if (candidate.verb == ActionVerb.WORK || isNecessity(candidate.verb)) return
+        if (candidate.verb == ActionVerb.WORK || candidate.verb == ActionVerb.ATTEND || isNecessity(candidate.verb)) return
         out += ScoreComponent(ScoreComponentType.COMMITMENT_CONFLICT, -shift.strength * CONFLICT_WEIGHT, "they are supposed to be working")
     }
 
@@ -206,7 +219,7 @@ class ActionScorer {
         ActionVerb.RELAX, ActionVerb.RETURN_HOME -> listOf(NeedKind.PRIVACY, NeedKind.COMFORT)
         ActionVerb.TAKE_BREAK -> listOf(NeedKind.AUTONOMY, NeedKind.COMFORT)
         ActionVerb.SOCIALISE, ActionVerb.GREET, ActionVerb.CONVERSE -> listOf(NeedKind.SOCIAL)
-        ActionVerb.WORK -> listOf(NeedKind.PURPOSE, NeedKind.RECOGNITION)
+        ActionVerb.WORK, ActionVerb.ATTEND -> listOf(NeedKind.PURPOSE, NeedKind.RECOGNITION)
         ActionVerb.WANDER, ActionVerb.WAIT -> emptyList()
     }
 
@@ -255,6 +268,9 @@ class ActionScorer {
         const val FINANCIAL_SCARCITY = 0.20
         const val MONEY_COMFORTABLE = 200
         const val CONFLICT_WEIGHT = 0.45
+        const val TASK_WEIGHT = 0.7
+        const val TASK_ON_SHIFT = 0.2
+        const val TASK_GUEST_FACING = 0.1
         const val NOISE = 0.15
     }
 }

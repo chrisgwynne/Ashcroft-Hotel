@@ -12,6 +12,8 @@ import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.FactTopic
 import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.HotelLayout
+import com.ashcroft.ripple.core.model.HotelTask
+import com.ashcroft.ripple.core.model.HotelTaskStatus
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
@@ -20,6 +22,7 @@ import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.SimTime
+import com.ashcroft.ripple.core.model.Tendencies
 import com.ashcroft.ripple.core.world.AshcroftNav
 
 /**
@@ -41,7 +44,7 @@ class SimulationEngine(
 
     fun step(state: WorldState): WorldState {
         val now = state.clock + 1
-        val world = HotelWorldQueries(layout, graph, locator, state.people)
+        val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks)
         val decider = DecisionMaker(world)
 
         val advanced = state.people.map { advance(it, state.people, world, decider, state.seed, now) }
@@ -49,9 +52,51 @@ class SimulationEngine(
         val socials = advanced.mapNotNull { it.social }.sortedBy { it.actor.value }
         for (event in socials) resolveSocial(event, byId, state.seed, now)
 
+        val resolvedTasks = resolveTasks(byId, state.tasks, now)
         val people = state.people.map { byId.getValue(it.id) }
+        val tasks = HotelOperations.generate(layout, people, resolvedTasks, now)
         val chronicle = Chronicler.update(state.people, people, state.chronicle, now)
-        return state.copy(clock = now, people = people, chronicle = chronicle)
+        return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks)
+    }
+
+    /**
+     * Turn just-completed ATTEND actions into resolved tasks. A guest-facing task
+     * finished while its requester is present becomes a small service interaction —
+     * both remember it, gratitude and goodwill grow — which is how ordinary work
+     * puts staff and guests together.
+     */
+    private fun resolveTasks(byId: MutableMap<PersonId, Person>, tasks: List<HotelTask>, now: SimTime): List<HotelTask> {
+        val open = tasks.associateBy { it.id }.toMutableMap()
+        for (person in byId.values.sortedBy { it.id.value }) {
+            val action = person.action
+            if (action.verb != ActionVerb.ATTEND || action.phase != ActionPhase.COMPLETED) continue
+            val task = action.targetTaskId?.let { open[it] } ?: continue
+            if (!task.isOpen) continue
+            open[task.id] = task.copy(status = HotelTaskStatus.COMPLETED, assignedTo = person.id)
+            byId[person.id] = person.copy(
+                needs = person.needs.with(NeedKind.RECOGNITION, person.needs[NeedKind.RECOGNITION] + 0.05f),
+                tendencyEvidence = person.tendencyEvidence + (Tendencies.HELP to (person.tendencyEvidence[Tendencies.HELP] ?: 0) + 1),
+            )
+            val requesterId = task.requestedBy
+            val requester = requesterId?.let { byId[it] }
+            if (task.type.guestFacing && requester != null && requester.location.roomId == task.locationId) {
+                byId[requesterId] = requester.copy(
+                    memories = remember(requester, MemoryKind.WAS_HELPED, person.id, valence = 0.5, importance = 0.4, now = now),
+                    relationships = requester.relationships.adjust(
+                        person.id,
+                        mapOf(RelationDimension.GRATITUDE to 0.08, RelationDimension.FAMILIARITY to 0.05),
+                    ),
+                    acquaintances = requester.acquaintances + person.id,
+                )
+                val server = byId.getValue(person.id)
+                byId[person.id] = server.copy(
+                    memories = remember(server, MemoryKind.HELPED_SOMEONE, requesterId, 0.4, 0.3, now),
+                    relationships = server.relationships.adjust(requesterId, mapOf(RelationDimension.FAMILIARITY to 0.05)),
+                    acquaintances = server.acquaintances + requesterId,
+                )
+            }
+        }
+        return open.values.toList()
     }
 
     fun run(state: WorldState, minutes: Int): WorldState {

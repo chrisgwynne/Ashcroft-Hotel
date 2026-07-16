@@ -24,6 +24,7 @@ class StubWorld(
     private val reachable: Set<String> = DEFAULT_ROOMS.keys,
     private val occupants: Map<String, List<PersonId>> = emptyMap(),
     private val peopleMap: Map<PersonId, Person> = emptyMap(),
+    private val tasks: List<TaskOffer> = emptyList(),
 ) : WorldQueries {
     override fun roomKind(room: RoomId): RoomKind? = kinds[room.value]
 
@@ -44,6 +45,8 @@ class StubWorld(
     override fun peopleInRoom(room: RoomId): List<PersonId> = occupants[room.value] ?: emptyList()
 
     override fun person(id: PersonId): Person? = peopleMap[id]
+
+    override fun openTasksFor(actor: Person): List<TaskOffer> = tasks
 
     companion object {
         val DEFAULT_ROOMS = mapOf(

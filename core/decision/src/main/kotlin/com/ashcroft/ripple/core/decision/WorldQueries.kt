@@ -1,10 +1,26 @@
 package com.ashcroft.ripple.core.decision
 
+import com.ashcroft.ripple.core.model.Department
+import com.ashcroft.ripple.core.model.HotelTaskId
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.RoomKind
 import com.ashcroft.ripple.core.model.WorldPos
+
+/**
+ * An open piece of hotel work the actor could take on, reduced to what the
+ * decision engine needs to weigh it: where it is, how pressing, whether it faces
+ * a guest, and which department it belongs to.
+ */
+data class TaskOffer(
+    val taskId: HotelTaskId,
+    val room: RoomId,
+    val label: String,
+    val priority: Double,
+    val guestFacing: Boolean,
+    val department: Department,
+)
 
 /**
  * The narrow window the decision engine has onto the world. Keeping it an
@@ -31,4 +47,7 @@ interface WorldQueries {
 
     /** Read another person — the engine only ever copies public attributes (name/role). */
     fun person(id: PersonId): Person?
+
+    /** Open tasks [actor] is permitted (by role) and able (by reach) to take on right now. */
+    fun openTasksFor(actor: Person): List<TaskOffer>
 }

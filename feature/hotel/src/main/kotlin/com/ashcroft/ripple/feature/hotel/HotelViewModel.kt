@@ -282,6 +282,7 @@ class HotelViewModel
                 ActionVerb.CONVERSE -> if (who != null) "Talking with $who" else "Chatting"
                 ActionVerb.WANDER -> "Wandering"
                 ActionVerb.WAIT -> "Waiting"
+                ActionVerb.ATTEND -> if (where != null) "Attending to $where" else "Attending to a task"
             }
         }
 

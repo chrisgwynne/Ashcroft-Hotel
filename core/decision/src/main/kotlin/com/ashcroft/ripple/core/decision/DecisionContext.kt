@@ -47,5 +47,6 @@ data class DecisionContext(
     val activeCommitments: List<Commitment>,
     val recentMemories: List<Memory>,
     val availableActions: List<ActionCandidate>,
+    val availableTasks: List<TaskOffer>,
     val simTime: SimTime,
 )
