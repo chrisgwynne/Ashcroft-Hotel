@@ -83,21 +83,28 @@ class DecisionMaker(private val world: WorldQueries) {
         return DecisionResult(action, record, goals)
     }
 
-    /** Perceived people are only those in the actor's own room; only public attributes are read. */
+    /**
+     * People the actor is actually aware of right now — those in the same room
+     * *and* within their attention (a busy worker notices little, an idle one
+     * notices all). Only public attributes are read; sharing a room is necessary
+     * but not sufficient for a social approach.
+     */
     private fun perceive(actor: Person, currentRoom: com.ashcroft.ripple.core.model.RoomId?): List<PerceivedPerson> {
         if (currentRoom == null) return emptyList()
-        return world.peopleInRoom(currentRoom)
-            .filter { it != actor.id }
-            .mapNotNull { id ->
-                val other = world.person(id) ?: return@mapNotNull null
-                PerceivedPerson(
-                    id = id,
-                    name = other.name,
-                    role = other.role,
-                    sentiment = actor.sentimentToward(id),
-                    alreadyKnown = actor.acquaintances.contains(id),
-                )
-            }
+        val inRoom = world.peopleInRoom(currentRoom).filter { it != actor.id }
+        val crowding = inRoom.size
+        return inRoom.mapNotNull { id ->
+            val other = world.person(id) ?: return@mapNotNull null
+            val known = actor.acquaintances.contains(id)
+            if (!Awareness.notices(actor, other.role, known, crowding)) return@mapNotNull null
+            PerceivedPerson(
+                id = id,
+                name = other.name,
+                role = other.role,
+                sentiment = actor.sentimentToward(id),
+                alreadyKnown = known,
+            )
+        }
     }
 
     private fun mergeGoals(actor: Person, fresh: List<Goal>): List<Goal> {

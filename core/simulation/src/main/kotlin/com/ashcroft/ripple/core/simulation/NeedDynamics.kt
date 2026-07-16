@@ -33,7 +33,10 @@ object NeedDynamics {
             NeedKind.SAFETY to 0.006f,
             NeedKind.HYGIENE to -0.0003f,
         )
-        ActivityKind.SOCIALISE -> mapOf(NeedKind.SOCIAL to 0.020f, NeedKind.RECOGNITION to 0.004f)
+        // Being in a sociable space is pleasant but does not itself satisfy the need
+        // for company — only an actual exchange (resolved in ConversationSystem) does.
+        // This stops "sit in the bar alone" from standing in for real conversation.
+        ActivityKind.SOCIALISE -> mapOf(NeedKind.SOCIAL to 0.004f, NeedKind.COMFORT to 0.004f)
         ActivityKind.WASH -> mapOf(NeedKind.HYGIENE to 0.040f, NeedKind.COMFORT to 0.004f)
         ActivityKind.RELAX -> mapOf(
             NeedKind.PRIVACY to 0.018f,
