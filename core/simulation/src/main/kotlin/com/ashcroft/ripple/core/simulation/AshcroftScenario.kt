@@ -1,6 +1,7 @@
 package com.ashcroft.ripple.core.simulation
 
-import com.ashcroft.ripple.core.model.Activity
+import com.ashcroft.ripple.core.model.ActionState
+import com.ashcroft.ripple.core.model.BehaviourHistory
 import com.ashcroft.ripple.core.model.Commitment
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.GridCell
@@ -163,8 +164,14 @@ object AshcroftScenario {
             ),
             homeRoom = RoomId(homeRoom),
             schedule = schedule,
+            goals = emptyList(),
+            memories = emptyList(),
+            acquaintances = emptySet(),
+            behaviour = BehaviourHistory(),
+            money = if (role.isStaff) 120 else 260,
             location = start,
-            currentActivity = Activity.IDLE,
+            action = ActionState.IDLE,
+            lastDecision = null,
         )
     }
 

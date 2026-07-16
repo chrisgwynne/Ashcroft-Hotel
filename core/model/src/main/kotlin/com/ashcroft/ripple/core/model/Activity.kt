@@ -15,28 +15,6 @@ enum class ActivityKind {
     RELAX,
 }
 
-/**
- * A concrete thing a person is doing right now. Activities are chosen by the
- * (Phase 2) activity chooser from competing pressures — never from a fixed
- * per-person script. [plannedMinutes] is how long the activity lasts once the
- * person has reached [targetRoom].
- */
-@Serializable
-data class Activity(
-    val kind: ActivityKind,
-    val targetRoom: RoomId?,
-    val startedAt: SimTime,
-    val plannedMinutes: Int,
-    /** Minutes already spent performing the activity at the destination. */
-    val elapsedMinutes: Int = 0,
-) {
-    fun isComplete(): Boolean = elapsedMinutes >= plannedMinutes
-
-    companion object {
-        val IDLE = Activity(ActivityKind.IDLE, targetRoom = null, startedAt = SimTime.START, plannedMinutes = 0)
-    }
-}
-
 /** The kind of obligation a [Commitment] represents. */
 @Serializable
 enum class CommitmentKind {

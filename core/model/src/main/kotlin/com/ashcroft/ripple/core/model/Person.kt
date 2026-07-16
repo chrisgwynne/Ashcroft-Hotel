@@ -28,11 +28,12 @@ enum class RoleKind {
 data class Identity(val name: String, val age: Int)
 
 /**
- * A person in (or around) the hotel. Phase 2 gives them enough interior state
- * to move about with purpose — needs, personality, a schedule of commitments,
- * a current activity and a location. Memories, goals, relationships and the
- * decision engine arrive in later phases; this is deliberately not a scripted
- * life story.
+ * A person in (or around) the hotel. By Phase 3 they carry enough interior
+ * state to *decide*: needs, personality, a schedule of commitments, dynamic
+ * goals, memories, a rolling behaviour history, a location and the concrete
+ * action they are committed to (with its lifecycle phase). [lastDecision]
+ * retains the structured reasoning behind the current action for the "Why?"
+ * interface. This is deliberately not a scripted life story.
  */
 @Serializable
 data class Person(
@@ -45,8 +46,18 @@ data class Person(
     /** The room a person returns to (staff bedroom or guest room), if any. */
     val homeRoom: RoomId?,
     val schedule: List<Commitment>,
+    val goals: List<Goal>,
+    val memories: List<Memory>,
+    val acquaintances: Set<PersonId>,
+    val behaviour: BehaviourHistory,
+    val money: Int,
     val location: LocationState,
-    val currentActivity: Activity,
+    val action: ActionState,
+    val lastDecision: DecisionRecord?,
 ) {
     val name: String get() = identity.name
+
+    /** How this person currently feels about [other], from remembered moments. */
+    fun sentimentToward(other: PersonId): Double =
+        memories.filter { it.subjectId == other }.sumOf { it.sentiment() }
 }

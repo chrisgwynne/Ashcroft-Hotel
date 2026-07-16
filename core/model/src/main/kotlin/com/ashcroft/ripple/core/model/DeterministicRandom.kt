@@ -1,4 +1,4 @@
-package com.ashcroft.ripple.core.simulation
+package com.ashcroft.ripple.core.model
 
 /**
  * A tiny, allocation-free SplitMix64 generator. The simulation never uses

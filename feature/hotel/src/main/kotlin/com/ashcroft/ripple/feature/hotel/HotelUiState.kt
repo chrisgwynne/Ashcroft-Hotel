@@ -24,24 +24,41 @@ data class SelectedRoom(
     val occupants: List<String>,
 )
 
-/** A readable, observation-level view of a selected person (no raw stat dump). */
+data class NeedReadout(val label: String, val note: String, val level: Float)
+
+/**
+ * A readable, observation-level view of a selected person: what they are doing,
+ * why, and how they feel — never a raw stat dump.
+ */
 data class PersonView(
     val id: String,
     val name: String,
     val ageAndRole: String,
     val mood: String,
-    val activity: String,
-    val whereabouts: String,
+    val currentAction: String,
+    val actionPhase: String,
+    val destination: String?,
+    val currentGoal: String?,
+    val reasonSummary: String,
+    val topSupport: String?,
+    val topConflict: String?,
     val needs: List<NeedReadout>,
 )
 
-data class NeedReadout(val label: String, val note: String, val level: Float)
+/** A plausible alternative the person weighed, and why it lost. */
+data class AlternativeView(val label: String, val whyLower: String)
 
-/**
- * Everything the hotel screen needs to render its chrome and the living scene.
- * The isometric room geometry is static (supplied separately); [people] and
- * [selectedPerson] change every simulated minute.
- */
+/** The full "Why?" account for the selected person's current action. */
+data class WhyView(
+    val headline: String,
+    val summary: String,
+    val positives: List<String>,
+    val negatives: List<String>,
+    val alternatives: List<AlternativeView>,
+    val developerLines: List<String>,
+    val stochastic: String,
+)
+
 data class HotelUiState(
     val hotelName: String,
     val establishedYear: Int,
@@ -54,6 +71,9 @@ data class HotelUiState(
     val people: List<PersonMarker>,
     val selectedRoom: SelectedRoom?,
     val selectedPerson: PersonView?,
+    val whyOpen: Boolean,
+    val developerMode: Boolean,
+    val why: WhyView?,
 )
 
 data class FloorOption(val level: Int, val label: String)

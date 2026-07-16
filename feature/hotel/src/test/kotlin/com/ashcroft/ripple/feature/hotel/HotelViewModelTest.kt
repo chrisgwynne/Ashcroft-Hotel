@@ -42,7 +42,8 @@ class HotelViewModelTest {
             assertNotNull(person)
             assertEquals("Maya Bennett", person!!.name)
             assertTrue(person.needs.isNotEmpty())
-            assertTrue(person.activity.isNotBlank())
+            assertTrue(person.currentAction.isNotBlank())
+            assertTrue(person.actionPhase.isNotBlank())
         }
     }
 

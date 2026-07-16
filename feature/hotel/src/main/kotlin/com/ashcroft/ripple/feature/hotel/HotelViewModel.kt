@@ -2,10 +2,18 @@ package com.ashcroft.ripple.feature.hotel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ashcroft.ripple.core.model.ActivityKind
+import com.ashcroft.ripple.core.decision.ExplanationBuilder
+import com.ashcroft.ripple.core.model.ActionPhase
+import com.ashcroft.ripple.core.model.ActionState
+import com.ashcroft.ripple.core.model.ActionVerb
+import com.ashcroft.ripple.core.model.DecisionRecord
+import com.ashcroft.ripple.core.model.Goal
+import com.ashcroft.ripple.core.model.GoalTarget
+import com.ashcroft.ripple.core.model.GoalType
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.NeedKind
 import com.ashcroft.ripple.core.model.Person
+import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoleKind
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.SimTime
@@ -25,11 +33,11 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Drives the living hotel. It owns the deterministic [SimulationEngine] and a
- * seeded [WorldState], advances the world on a cadence set by the observer time
- * controls, and projects the result into a readable [HotelUiState]. Pausing or
- * changing speed only changes how fast time is consumed — never the outcomes,
- * which stay a pure function of seed and elapsed minutes.
+ * Drives the living hotel and projects it into a readable, explainable UI. It
+ * owns the deterministic [SimulationEngine] and a seeded [WorldState], advances
+ * the world under the observer time controls, and — for a selected person —
+ * translates their needs, goals, action and recorded decision into plain
+ * language, including a full "Why?" account with the alternatives they weighed.
  */
 @HiltViewModel
 class HotelViewModel
@@ -38,7 +46,6 @@ class HotelViewModel
         private val layout: HotelLayout = AshcroftLayout.build()
         private val engine = SimulationEngine(layout)
 
-        /** Static isometric geometry handed to the renderer. */
         val scene: HotelScene = HotelScene.from(layout)
 
         private var world: WorldState = AshcroftScenario.initial()
@@ -46,6 +53,8 @@ class HotelViewModel
         private var timeSpeed: TimeSpeed = TimeSpeed.PAUSED
         private var selectedPersonId: String? = null
         private var selectedRoomId: RoomId? = null
+        private var whyOpen: Boolean = false
+        private var developerMode: Boolean = false
 
         private val _uiState = MutableStateFlow(project())
         val uiState: StateFlow<HotelUiState> = _uiState.asStateFlow()
@@ -66,12 +75,14 @@ class HotelViewModel
         fun selectRoom(id: RoomId?) {
             selectedRoomId = id
             selectedPersonId = null
+            whyOpen = false
             _uiState.value = project()
         }
 
         fun selectPerson(id: String?) {
             selectedPersonId = id
             if (id != null) selectedRoomId = null
+            whyOpen = false
             _uiState.value = project()
         }
 
@@ -86,19 +97,41 @@ class HotelViewModel
             _uiState.value = project()
         }
 
-        private fun project(): HotelUiState = HotelUiState(
-            hotelName = layout.name,
-            establishedYear = layout.establishedYear,
-            clockLabel = clockLabel(world.clock),
-            weatherLabel = "Overcast, 11°C",
-            occupancyLabel = "${world.people.size} people in the hotel",
-            focusedLevel = focusedLevel,
-            floors = layout.floors.sortedBy { it.level }.map { FloorOption(it.level, it.displayName) },
-            timeSpeed = timeSpeed,
-            people = world.people.map(::markerFor),
-            selectedRoom = selectedRoomId?.let(::roomView),
-            selectedPerson = selectedPersonId?.let { id -> world.people.firstOrNull { it.id.value == id }?.let(::personView) },
-        )
+        fun toggleWhy() {
+            whyOpen = !whyOpen
+            _uiState.value = project()
+        }
+
+        fun toggleDeveloperMode() {
+            developerMode = !developerMode
+            _uiState.value = project()
+        }
+
+        private fun personName(id: PersonId): String = world.person(id)?.name ?: "someone"
+
+        private fun roomName(id: RoomId): String = layout.room(id)?.displayName ?: id.value
+
+        private val explanations = ExplanationBuilder(roomName = ::roomName, personName = ::personName)
+
+        private fun project(): HotelUiState {
+            val selected = selectedPersonId?.let { id -> world.people.firstOrNull { it.id.value == id } }
+            return HotelUiState(
+                hotelName = layout.name,
+                establishedYear = layout.establishedYear,
+                clockLabel = clockLabel(world.clock),
+                weatherLabel = "Overcast, 11°C",
+                occupancyLabel = "${world.people.size} people in the hotel",
+                focusedLevel = focusedLevel,
+                floors = layout.floors.sortedBy { it.level }.map { FloorOption(it.level, it.displayName) },
+                timeSpeed = timeSpeed,
+                people = world.people.map(::markerFor),
+                selectedRoom = selectedRoomId?.let(::roomView),
+                selectedPerson = selected?.let(::personView),
+                whyOpen = whyOpen && selected?.lastDecision != null,
+                developerMode = developerMode,
+                why = if (whyOpen) selected?.lastDecision?.let { whyView(it) } else null,
+            )
+        }
 
         private fun markerFor(person: Person): PersonMarker = PersonMarker(
             id = person.id.value,
@@ -112,61 +145,106 @@ class HotelViewModel
         private fun roomView(id: RoomId): SelectedRoom? {
             val room = layout.room(id) ?: return null
             val floorName = layout.floors.first { it.id == room.floorId }.displayName
-            val occupants = world.people.filter { it.location.roomId == id }.map { it.name }
             return SelectedRoom(
                 id = room.id,
                 name = room.displayName,
-                kindLabel = readableKind(room.kind.name),
+                kindLabel = readable(room.kind.name),
                 floorLabel = floorName,
-                occupants = occupants,
+                occupants = world.people.filter { it.location.roomId == id }.map { it.name },
             )
         }
 
-        private fun personView(person: Person): PersonView = PersonView(
-            id = person.id.value,
-            name = person.name,
-            ageAndRole = "${person.identity.age} · ${readableRole(person.role)}",
-            mood = moodOf(person),
-            activity = activityText(person),
-            whereabouts = whereaboutsText(person),
-            needs = readouts(person),
-        )
-
-        private fun activityText(person: Person): String {
-            if (person.location.isMoving) {
-                val dest = person.currentActivity.targetRoom?.let { layout.room(it)?.displayName }
-                return if (dest != null) "Walking to $dest" else "On the move"
+        private fun personView(person: Person): PersonView {
+            val chosen = person.lastDecision?.let { record ->
+                record.consideredActions.firstOrNull { it.candidate == record.chosenAction }
             }
-            val here = person.location.roomId?.let { layout.room(it)?.displayName } ?: "the hotel"
-            return when (person.currentActivity.kind) {
-                ActivityKind.SLEEP -> "Resting in $here"
-                ActivityKind.EAT -> "Eating in $here"
-                ActivityKind.WORK -> "Working in $here"
-                ActivityKind.SOCIALISE -> "Socialising in $here"
-                ActivityKind.WASH -> "Freshening up in $here"
-                ActivityKind.RELAX -> "Relaxing in $here"
-                ActivityKind.TRAVEL -> "On the move"
-                ActivityKind.IDLE -> "Pausing in $here"
+            return PersonView(
+                id = person.id.value,
+                name = person.name,
+                ageAndRole = "${person.identity.age} · ${readableRole(person.role)}",
+                mood = moodOf(person),
+                currentAction = actionHeadline(person.action),
+                actionPhase = phaseLabel(person.action.phase),
+                destination = person.action.targetRoom?.takeIf { person.location.isMoving }?.let(::roomName),
+                currentGoal = topGoalLabel(person.goals),
+                reasonSummary = person.action.reasonSummary,
+                topSupport = chosen?.topPositive()?.explanationKey,
+                topConflict = chosen?.topNegative()?.explanationKey,
+                needs = readouts(person),
+            )
+        }
+
+        private fun whyView(record: DecisionRecord): WhyView {
+            val explanation = explanations.explain(record)
+            val chosen = record.consideredActions.firstOrNull { it.candidate == record.chosenAction }
+            return WhyView(
+                headline = explanation.headline,
+                summary = explanation.summary,
+                positives = explanation.positives,
+                negatives = explanation.negatives,
+                alternatives = explanation.alternatives.map { AlternativeView(it.label, it.whyLower) },
+                developerLines = chosen?.components?.map { "${it.type}: ${format(it.value)}" } ?: emptyList(),
+                stochastic = chosen?.let { "noise ${format(it.stochasticAdjustment)} · total ${format(it.finalScore)}" } ?: "",
+            )
+        }
+
+        private fun actionHeadline(action: ActionState): String {
+            val where = action.targetRoom?.let(::roomName)
+            val who = action.targetPerson?.let(::personName)
+            return when (action.verb) {
+                ActionVerb.WORK -> if (where != null) "Working at $where" else "Working"
+                ActionVerb.EAT -> if (where != null) "Eating at $where" else "Eating"
+                ActionVerb.SLEEP -> if (where != null) "Resting in $where" else "Resting"
+                ActionVerb.WASH -> "Freshening up"
+                ActionVerb.RELAX, ActionVerb.RETURN_HOME -> if (where != null) "Relaxing in $where" else "Relaxing"
+                ActionVerb.TAKE_BREAK -> "Taking a break"
+                ActionVerb.SOCIALISE -> if (where != null) "Sitting in $where" else "Socialising"
+                ActionVerb.GREET -> if (who != null) "Greeting $who" else "Greeting someone"
+                ActionVerb.CONVERSE -> if (who != null) "Talking with $who" else "Chatting"
+                ActionVerb.WANDER -> "Wandering"
+                ActionVerb.WAIT -> "Waiting"
             }
         }
 
-        private fun whereaboutsText(person: Person): String {
-            if (person.location.isMoving) return "On the move"
-            val room = person.location.roomId?.let { layout.room(it)?.displayName }
-            return room ?: "In the hotel"
+        private fun phaseLabel(phase: ActionPhase): String = when (phase) {
+            ActionPhase.PROPOSED, ActionPhase.ACCEPTED -> "About to start"
+            ActionPhase.TRAVELLING -> "On the way"
+            ActionPhase.IN_PROGRESS -> "In progress"
+            ActionPhase.COMPLETED -> "Just finished"
+            ActionPhase.FAILED -> "Didn't work out"
+            ActionPhase.INTERRUPTED -> "Interrupted"
+            ActionPhase.ABANDONED -> "Abandoned"
+        }
+
+        private fun topGoalLabel(goals: List<Goal>): String? {
+            val goal = goals.maxByOrNull { it.priority } ?: return null
+            return when (goal.type) {
+                GoalType.SATISFY_NEED -> (goal.target as? GoalTarget.Need)?.let { "see to a ${it.kind.name.lowercase()} need" }
+                GoalType.FULFIL_WORK -> "do their job well"
+                GoalType.GAIN_APPROVAL -> "earn some approval"
+                GoalType.COMPLETE_STAY -> "make the most of their stay"
+                GoalType.PRESERVE_RELATIONSHIP -> "keep a relationship warm"
+                GoalType.AVOID_DISCOMFORT -> "avoid discomfort"
+                GoalType.SEEK_PRIVACY -> "find some privacy"
+                GoalType.IMPROVE_COMPETENCE -> "get better at something"
+                GoalType.SAVE_RESOURCES -> "be careful with money"
+            }
         }
 
         private fun moodOf(person: Person): String {
             val need = person.needs.mostPressing()
-            val value = person.needs[need]
-            if (value > 0.5f) return "Content"
+            if (person.needs[need] > 0.5f) return "Content"
             return when (need) {
                 NeedKind.HUNGER -> "Hungry"
                 NeedKind.REST -> "Tired"
                 NeedKind.SOCIAL -> "Craving company"
                 NeedKind.HYGIENE -> "Wanting to freshen up"
                 NeedKind.PRIVACY -> "In need of quiet"
+                NeedKind.COMFORT -> "Unsettled"
+                NeedKind.SAFETY -> "Uneasy"
                 NeedKind.PURPOSE -> "Restless"
+                NeedKind.RECOGNITION -> "Under-appreciated"
+                NeedKind.AUTONOMY -> "Hemmed in"
             }
         }
 
@@ -192,6 +270,11 @@ class HotelViewModel
             return "Day ${time.dayIndex + 1} · $hh:$mm"
         }
 
+        private fun format(value: Double): String {
+            val rounded = kotlin.math.round(value * 100) / 100.0
+            return rounded.toString()
+        }
+
         private fun initials(name: String): String {
             val parts = name.trim().split(' ').filter { it.isNotEmpty() }
             return when {
@@ -201,9 +284,9 @@ class HotelViewModel
             }
         }
 
-        private fun readableRole(role: RoleKind): String = readableKind(role.name)
+        private fun readableRole(role: RoleKind): String = readable(role.name)
 
-        private fun readableKind(raw: String): String = raw
+        private fun readable(raw: String): String = raw
             .lowercase()
             .split('_')
             .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }

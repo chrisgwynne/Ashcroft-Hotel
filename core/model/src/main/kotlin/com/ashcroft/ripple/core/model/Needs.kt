@@ -15,7 +15,11 @@ enum class NeedKind {
     SOCIAL,
     HYGIENE,
     PRIVACY,
+    COMFORT,
+    SAFETY,
     PURPOSE,
+    RECOGNITION,
+    AUTONOMY,
 }
 
 /**
