@@ -74,7 +74,7 @@ benchmark               Macrobenchmark module (runs on device; Phase 7)
 ## Tech stack
 
 - Kotlin 2.2.21, Jetpack Compose (stable BOM), Material 3 with a custom look
-- **AGP 9.2.1**, Gradle 9.2.1, JDK 17 target, `compileSdk`/`targetSdk` 36,
+- **AGP 9.2.1**, Gradle 9.4.1, JDK 17 target, `compileSdk`/`targetSdk` 36,
   `minSdk` 28
 - Hilt, Room, DataStore, Coroutines/StateFlow, Kotlinx Serialization, KSP
 - JUnit, Turbine, Detekt, Ktlint, Gradle version catalog
@@ -97,7 +97,7 @@ CI (`.github/workflows/ci.yml`) runs the same commands on every push/PR.
 
 ### A note on build verification in the authoring sandbox
 
-The committed configuration targets **AGP 9.2.1 + Gradle 9.2.1** as specified,
+The committed configuration targets **AGP 9.2.1 + Gradle 9.4.1** as specified,
 and Hilt 2.60.1 (which requires AGP 9). Gradle 9.x distributions are served from
 GitHub, which the authoring sandbox's egress policy blocks, so the full 9.2.1
 build could not be executed there. The Kotlin/Compose/Room/Hilt/KSP sources were
