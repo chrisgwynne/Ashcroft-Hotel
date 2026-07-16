@@ -45,6 +45,8 @@ data class PersonView(
     val needs: List<NeedReadout>,
     // Phase 4 — the inner social life, shown as observation, never raw numbers.
     val feeling: String?,
+    val duty: String?,
+    val satisfaction: String?,
     val tendencies: List<String>,
     val relationships: List<String>,
     val knows: List<String>,
@@ -87,6 +89,7 @@ data class HotelUiState(
     val developerMode: Boolean,
     val why: WhyView?,
     val chronicle: List<String>,
+    val openTaskCount: Int,
 )
 
 data class FloorOption(val level: Int, val label: String)

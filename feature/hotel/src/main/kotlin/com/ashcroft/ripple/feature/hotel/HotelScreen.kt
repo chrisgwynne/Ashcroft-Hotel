@@ -107,8 +107,9 @@ private fun HotelHeader(state: HotelUiState) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
             )
+            val tasks = if (state.openTaskCount > 0) "   •   ${state.openTaskCount} jobs on" else ""
             Text(
-                text = "${state.clockLabel}   •   ${state.weatherLabel}   •   ${state.occupancyLabel}",
+                text = "${state.clockLabel}   •   ${state.weatherLabel}   •   ${state.occupancyLabel}$tasks",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -247,6 +248,8 @@ private fun WhyPanel(
 
 @Composable
 private fun SocialSection(person: PersonView) {
+    person.duty?.let { Hint("On: $it", top = 6) }
+    person.satisfaction?.let { Hint("Their stay: $it", top = 2) }
     person.feeling?.let { Hint("Feeling: $it", top = 6) }
     person.recalledMemory?.let { Hint("Just remembered: $it", top = 2) }
     person.lastConversation?.let { Hint("Last exchange: $it", top = 2) }

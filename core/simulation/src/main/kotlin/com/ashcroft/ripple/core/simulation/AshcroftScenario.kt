@@ -31,6 +31,16 @@ import com.ashcroft.ripple.core.world.AshcroftLayout
  * scripted. What happens next emerges from needs, commitments and the chooser.
  */
 object AshcroftScenario {
+    /**
+     * The default seed. Chosen after the Phase 5 opportunity-structure work by
+     * comparing several seeds over 30 days: 1924 is representative rather than
+     * extreme — a moderate, believable pace (~240 conversations/day), the most
+     * distinct characters (lowest behavioural similarity), the fewest repeated
+     * conversation chains, and the sparsest chronicle, while still showing active
+     * operations and steady staff–guest contact. It is no longer the socially
+     * dormant seed it was before Phase 5; it is simply the calmest of the lively
+     * ones, which is what a default should be.
+     */
     const val DEFAULT_SEED = 1924L
 
     /** Simulation begins at 06:00 on day 0. */

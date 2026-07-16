@@ -56,6 +56,22 @@ object Inspectors {
 
     fun chronicle(state: WorldState): List<String> = state.chronicle.map { "${it.headline} (sig ${round(it.significance)})" }
 
+    /** Open hotel work right now — the operational backdrop. */
+    fun openTasks(state: WorldState): List<String> = state.tasks.filter { it.isOpen }.map { t ->
+        val where = state.person(t.requestedBy ?: PersonId(""))?.name?.let { " for $it" } ?: ""
+        "${t.type.name.lowercase().replace('_', ' ')} at ${t.locationId.value}$where"
+    }
+
+    fun openTaskCount(state: WorldState): Int = state.tasks.count { it.isOpen }
+
+    /** The task a person is presently attending to, if any. */
+    fun dutyOf(state: WorldState, id: PersonId): String? {
+        val person = state.person(id) ?: return null
+        val taskId = person.action.targetTaskId ?: return null
+        val task = state.tasks.firstOrNull { it.id == taskId } ?: return null
+        return task.type.name.lowercase().replace('_', ' ')
+    }
+
     private fun round(v: Double): Double = kotlin.math.round(v * 100) / 100.0
 
     private const val MEMORY_VIEW = 8

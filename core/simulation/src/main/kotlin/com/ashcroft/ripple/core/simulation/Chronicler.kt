@@ -19,6 +19,7 @@ internal object Chronicler {
     private const val CLOSE = 0.6
     private const val COLD = 0.5
     private const val RUMOUR_REACH = 3
+    private const val FAMILIAR_STAFF = 4
     private const val MIN_SIGNIFICANCE = 0.5
 
     fun update(previous: List<Person>, current: List<Person>, chronicle: List<ChronicleEntry>, now: SimTime): List<ChronicleEntry> {
@@ -26,6 +27,7 @@ internal object Chronicler {
         val additions = mutableListOf<ChronicleEntry>()
         additions += relationshipMilestones(current, known, now)
         additions += rumourReach(current, known, now)
+        additions += familiarGuests(current, known, now)
         return if (additions.isEmpty()) chronicle else chronicle + additions.filter { it.significance >= MIN_SIGNIFICANCE }
     }
 
@@ -77,6 +79,23 @@ internal object Chronicler {
                 ChronicleEntry(
                     id, now, "Word has got around the staff about a notable guest.",
                     significance = significance(holders.size / 5.0, involved = holders.size), involved = holders,
+                )
+            } else {
+                null
+            }
+        }
+    }
+
+    /** A guest served and greeted enough to be known by much of the staff has become a regular face. */
+    private fun familiarGuests(people: List<Person>, known: Set<String>, now: SimTime): List<ChronicleEntry> {
+        val staff = people.filter { it.role.isStaff }
+        return people.filter { it.role == com.ashcroft.ripple.core.model.RoleKind.GUEST }.mapNotNull { guest ->
+            val knownBy = staff.count { it.acquaintances.contains(guest.id) }
+            val id = "familiar:${guest.id.value}"
+            if (knownBy >= FAMILIAR_STAFF && id !in known) {
+                ChronicleEntry(
+                    id, now, "${guest.name} has become a familiar face to the staff.",
+                    significance = significance(knownBy / 6.0, involved = knownBy + 1), involved = setOf(guest.id),
                 )
             } else {
                 null

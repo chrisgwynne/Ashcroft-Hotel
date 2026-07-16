@@ -12,6 +12,7 @@ import com.ashcroft.ripple.core.model.DeterministicRandom
 import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.FactTopic
 import com.ashcroft.ripple.core.model.GoalTarget
+import com.ashcroft.ripple.core.model.GuestValue
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.HotelTaskStatus
@@ -88,6 +89,8 @@ class SimulationEngine(
             val requesterId = task.requestedBy
             val requester = requesterId?.let { byId[it] }
             if (task.type.guestFacing && requester != null && requester.location.roomId == task.locationId) {
+                // Prompt service lifts the guest's satisfaction (more so for those who value speed).
+                val bump = if (requester.stay?.expectations?.contains(GuestValue.SPEED) == true) 0.08 else 0.05
                 byId[requesterId] = requester.copy(
                     memories = remember(requester, MemoryKind.WAS_HELPED, person.id, valence = 0.5, importance = 0.4, now = now),
                     relationships = requester.relationships.adjust(
@@ -95,6 +98,7 @@ class SimulationEngine(
                         mapOf(RelationDimension.GRATITUDE to 0.08, RelationDimension.FAMILIARITY to 0.05),
                     ),
                     acquaintances = requester.acquaintances + person.id,
+                    stay = requester.stay?.let { it.copy(satisfaction = (it.satisfaction + bump).coerceAtMost(1.0)) },
                 )
                 val server = byId.getValue(person.id)
                 byId[person.id] = server.copy(
@@ -157,6 +161,11 @@ class SimulationEngine(
             needs = NeedDynamics.tick(person.needs, effective),
             knowledge = Perception.observe(person, everyone, now),
             emotions = EmotionDynamics.tick(person),
+            // Satisfaction ebbs toward a modest baseline between attentions, so a
+            // well-served guest stays content and a neglected one quietly sours.
+            stay = person.stay?.let {
+                it.copy(satisfaction = it.satisfaction + (SATISFACTION_BASELINE - it.satisfaction) * SATISFACTION_DRIFT)
+            },
         )
         val withNeeds = applyRecall(perceived, everyone, now)
 
@@ -344,6 +353,8 @@ class SimulationEngine(
         const val URGENT_FLOOR = 0.12f
         const val MAX_MEMORIES = 40
         const val HANDOVER_FIDELITY = 0.9
+        const val SATISFACTION_BASELINE = 0.45
+        const val SATISFACTION_DRIFT = 0.0004
 
         // A rebuffed overture leaves a small sting — a little resentment, and a face now known.
         val REBUFFED = mapOf(

@@ -135,6 +135,7 @@ class HotelViewModel
                 developerMode = developerMode,
                 why = if (whyOpen) selected?.lastDecision?.let { whyView(it) } else null,
                 chronicle = Inspectors.chronicle(world).takeLast(CHRONICLE_VIEW),
+                openTaskCount = Inspectors.openTaskCount(world),
             )
         }
 
@@ -177,6 +178,8 @@ class HotelViewModel
                 topConflict = chosen?.topNegative()?.explanationKey,
                 needs = readouts(person),
                 feeling = feelingOf(person),
+                duty = Inspectors.dutyOf(world, person.id),
+                satisfaction = person.stay?.let { satisfactionLabel(it.satisfaction) },
                 tendencies = Tendencies.of(person).map { it.label },
                 relationships = importantRelationships(person),
                 knows = readableBeliefs(person),
@@ -187,6 +190,13 @@ class HotelViewModel
                 developerRumours = if (developerMode) Inspectors.rumours(world, person.id) else emptyList(),
                 developerFalseBeliefs = if (developerMode) Inspectors.falseBeliefs(world, person.id) else emptyList(),
             )
+        }
+
+        private fun satisfactionLabel(value: Double): String = when {
+            value > 0.7 -> "Delighted with their stay"
+            value > 0.55 -> "Happy enough"
+            value > 0.4 -> "Finding it middling"
+            else -> "Less than impressed"
         }
 
         private fun feelingOf(person: Person): String? = when (person.emotions.strongest) {

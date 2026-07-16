@@ -61,6 +61,15 @@ class Phase5StaysTest {
     }
 
     @Test
+    fun beingServedLiftsGuestSatisfaction() {
+        // Over a day of operations, at least one guest should be served often enough
+        // to sit above the neglected baseline their satisfaction otherwise ebbs toward.
+        val state = engine.run(AshcroftScenario.initial(), 24 * 60)
+        val best = state.people.mapNotNull { it.stay?.satisfaction }.maxOrNull() ?: 0.0
+        assertTrue("attentive service should leave a guest content ($best)", best > 0.5)
+    }
+
+    @Test
     fun scenarioWithStaysIsDeterministic() {
         val start = AshcroftScenario.initial()
         assertEquals(engine.run(start, 600), engine.run(start, 600))
