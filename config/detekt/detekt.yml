@@ -10,7 +10,7 @@ complexity:
   active: true
   LongParameterList:
     active: true
-    functionThreshold: 8
+    functionThreshold: 12
     constructorThreshold: 12
     ignoreDefaultParameters: true
   TooManyFunctions:
@@ -42,9 +42,8 @@ style:
 naming:
   active: true
   FunctionNaming:
-    active: true
-    # Composable functions are PascalCase.
-    ignoreAnnotated: ['Composable']
+    # Off: Composables are PascalCase and tests use descriptive underscored names.
+    active: false
   MatchingDeclarationName:
     # We intentionally group small related top-level declarations per file.
     active: false

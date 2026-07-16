@@ -8,9 +8,34 @@ game. The hotel is the environment in which independent simulated lives
 repeatedly intersect, and the player is an **observer** who follows the
 consequences of those encounters across decades.
 
-This repository currently contains **Phase 1 — Foundation**. No simulation
-content is implemented yet: Phase 1 delivers the technical foundation and a
-premium isometric proof-of-concept of the hotel view.
+This repository currently contains **Phase 1 — Foundation** and **Phase 2 —
+People & Movement**. The hotel is now populated: a seeded cast of staff,
+residents and guests move between rooms driven by needs and commitments.
+
+---
+
+## Phase 2 status
+
+Delivered (all logic is pure Kotlin with headless tests):
+
+- **Person & location model** — needs, personality traits, a schedule of
+  commitments, an activity and a world position.
+- **Navigation graph + pathfinding** — a walkable graph built from the layout
+  (with a stair portal between floors) and deterministic BFS routing.
+- **Needs dynamics** — needs drift each simulated minute and are relieved only
+  while the matching activity is performed at its destination.
+- **Activity chooser** — a precursor to the Phase 3 decision engine: candidate
+  activities compete on pressure (needs) and pull (commitments), biased by
+  personality and nudged by *seeded* noise — no rigid `if need < X` scripts.
+- **Deterministic simulation engine** — a pure `WorldState → WorldState` tick;
+  same seed + elapsed minutes always replays identically (verified by a
+  one-week soak test and no-teleport / bounded-needs invariants).
+- **The Ashcroft cast** — Evelyn Price, Maya Bennett, Arthur Cole, Theo Ward,
+  George Ashcroft, the Harrises and more, as *starting conditions only*.
+- **Living hotel view** — people are drawn on the isometric scene and move in
+  real time under the observer time controls; tap a person for a readable
+  profile (mood, current activity, whereabouts, needs) or a room to see who is
+  there now.
 
 ---
 

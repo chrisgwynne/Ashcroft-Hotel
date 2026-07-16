@@ -34,6 +34,7 @@ kotlin {
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:world"))
+    implementation(project(":core:simulation"))
     implementation(project(":core:rendering"))
     implementation(project(":core:designsystem"))
 

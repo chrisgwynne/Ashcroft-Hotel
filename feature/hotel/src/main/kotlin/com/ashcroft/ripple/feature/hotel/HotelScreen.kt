@@ -27,10 +27,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ashcroft.ripple.core.rendering.HotelRenderView
 
 /**
- * The default screen of Ripple: a premium isometric cut-away of The Ashcroft
- * with unobtrusive chrome — date/time, weather and occupancy up top, floor
- * focus and observer time controls, and a temporary information panel for the
- * selected room.
+ * The default screen of Ripple: a premium isometric cut-away of The Ashcroft,
+ * now alive with people moving between rooms. Unobtrusive chrome shows the
+ * clock, weather and occupancy; floor focus and observer time controls sit at
+ * the edges; tapping a person or room opens a readable information panel.
  */
 @Composable
 fun HotelScreen(
@@ -40,12 +40,7 @@ fun HotelScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize()) {
-        HotelSurface(
-            focusedLevel = state.focusedLevel,
-            selectedRoomId = state.selectedRoom?.id,
-            onRoomSelected = viewModel::selectRoom,
-            viewModel = viewModel,
-        )
+        HotelSurface(state = state, viewModel = viewModel)
 
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             HotelHeader(state)
@@ -53,38 +48,38 @@ fun HotelScreen(
         }
 
         Column(
-            modifier =
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(12.dp),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            state.selectedRoom?.let { RoomInfoPanel(it) }
+            state.selectedPerson?.let { PersonPanel(it) }
+            if (state.selectedPerson == null) {
+                state.selectedRoom?.let { RoomInfoPanel(it) }
+            }
             TimeControls(state.timeSpeed, viewModel::setTimeSpeed)
         }
     }
 }
 
 @Composable
-private fun HotelSurface(
-    focusedLevel: Int,
-    selectedRoomId: com.ashcroft.ripple.core.model.RoomId?,
-    onRoomSelected: (com.ashcroft.ripple.core.model.RoomId?) -> Unit,
-    viewModel: HotelViewModel,
-) {
+private fun HotelSurface(state: HotelUiState, viewModel: HotelViewModel) {
     val scene = remember { viewModel.scene }
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
             HotelRenderView(context).apply {
                 setScene(scene)
-                this.onRoomSelected = onRoomSelected
+                onRoomSelected = { viewModel.selectRoom(it) }
+                onPersonSelected = { viewModel.selectPerson(it) }
             }
         },
         update = { view ->
-            view.setFocusedLevel(focusedLevel)
-            view.setSelectedRoom(selectedRoomId)
+            view.setFocusedLevel(state.focusedLevel)
+            view.setPeople(state.people)
+            view.setSelectedRoom(state.selectedRoom?.id)
+            view.setSelectedPerson(state.selectedPerson?.id)
         },
     )
 }
@@ -113,10 +108,7 @@ private fun HotelHeader(state: HotelUiState) {
 }
 
 @Composable
-private fun FloorSelector(
-    state: HotelUiState,
-    onFocusFloor: (Int) -> Unit,
-) {
+private fun FloorSelector(state: HotelUiState, onFocusFloor: (Int) -> Unit) {
     Row(
         modifier = Modifier.padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -127,6 +119,46 @@ private fun FloorSelector(
                 onClick = { onFocusFloor(floor.level) },
                 label = { Text(floor.label) },
             )
+        }
+    }
+}
+
+@Composable
+private fun PersonPanel(person: PersonView) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = person.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = person.ageAndRole,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "${person.mood}  ·  ${person.activity}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                person.needs.forEach { need ->
+                    Text(
+                        text = "${need.label}: ${need.note}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -149,8 +181,13 @@ private fun RoomInfoPanel(room: SelectedRoom) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            val occupancy = if (room.occupants.isEmpty()) {
+                "Empty right now"
+            } else {
+                "Here now: ${room.occupants.joinToString(", ")}"
+            }
             Text(
-                text = "Footprint ${room.sizeLabel}",
+                text = occupancy,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -160,19 +197,13 @@ private fun RoomInfoPanel(room: SelectedRoom) {
 }
 
 @Composable
-private fun TimeControls(
-    current: TimeSpeed,
-    onSetSpeed: (TimeSpeed) -> Unit,
-) {
+private fun TimeControls(current: TimeSpeed, onSetSpeed: (TimeSpeed) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TimeSpeed.entries.forEach { speed ->
-            FilledTonalButton(
-                onClick = { onSetSpeed(speed) },
-                modifier = Modifier.padding(0.dp),
-            ) {
+            FilledTonalButton(onClick = { onSetSpeed(speed) }) {
                 Text(
                     text = speed.label,
                     fontWeight = if (speed == current) FontWeight.Bold else FontWeight.Normal,
