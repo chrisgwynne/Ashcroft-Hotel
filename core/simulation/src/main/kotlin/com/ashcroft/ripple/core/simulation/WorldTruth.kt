@@ -26,11 +26,18 @@ object WorldTruth {
         is FactTopic.PersonMood -> state.person(topic.person)?.let(Perception::moodWord)
     }
 
-    /** Whether [belief] contradicts what is actually the case right now. */
+    /**
+     * Whether [belief] contradicts what is actually the case right now. A belief
+     * held only faintly (its confidence worn away by time) no longer counts as
+     * one the person really holds, so it is not tallied as a false belief.
+     */
     fun isFalse(state: WorldState, belief: Belief): Boolean {
+        if (belief.confidence < HELD_FLOOR) return false
         val truth = valueFor(state, belief.claim.topic) ?: return false
         return truth != belief.claim.value
     }
+
+    private const val HELD_FLOOR = 0.15
 
     /** Everyone's currently-held beliefs that are out of step with the world. */
     fun falseBeliefs(state: WorldState): List<Pair<PersonId, Belief>> =

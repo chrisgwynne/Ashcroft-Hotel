@@ -60,6 +60,16 @@ data class Person(
     val relationships: Relationships = Relationships.EMPTY,
     /** Their current, fading emotional weather. */
     val emotions: EmotionState = EmotionState.CALM,
+    /** A memory presently brought to mind by the current context, if any. */
+    val recalledMemoryId: MemoryId? = null,
+    /** The most recent conversational exchange this person took part in. */
+    val lastConversation: ConversationRecord? = null,
+    /**
+     * A running tally of the kinds of things this person has been seen to do
+     * (help, confront, avoid, praise…). It is the *evidence* from which readable
+     * personality tendencies are inferred — never raw trait numbers.
+     */
+    val tendencyEvidence: Map<String, Int> = emptyMap(),
 ) {
     val name: String get() = identity.name
 

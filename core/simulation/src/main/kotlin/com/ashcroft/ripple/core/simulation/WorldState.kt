@@ -1,19 +1,22 @@
 package com.ashcroft.ripple.core.simulation
 
+import com.ashcroft.ripple.core.model.ChronicleEntry
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.SimTime
 
 /**
- * An immutable snapshot of the living hotel at one instant: the seeded clock
- * and every person's full state. Everything else (occupancy, who is where) is
- * derived, so a [WorldState] is the single source of truth a tick transforms.
+ * An immutable snapshot of the living hotel at one instant: the seeded clock,
+ * every person's full state, and the accumulated [chronicle] of outcomes that
+ * mattered. Everything else (occupancy, who is where) is derived, so a
+ * [WorldState] is the single source of truth a tick transforms.
  */
 data class WorldState(
     val seed: Long,
     val clock: SimTime,
     val people: List<Person>,
+    val chronicle: List<ChronicleEntry> = emptyList(),
 ) {
     fun person(id: PersonId): Person? = people.firstOrNull { it.id == id }
 

@@ -5,13 +5,13 @@ import com.ashcroft.ripple.core.model.ActionPhase
 import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.ActivityKind
-import com.ashcroft.ripple.core.model.Belief
 import com.ashcroft.ripple.core.model.CommitmentKind
+import com.ashcroft.ripple.core.model.ConversationReception
 import com.ashcroft.ripple.core.model.DeterministicRandom
 import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.FactTopic
+import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.HotelLayout
-import com.ashcroft.ripple.core.model.InformationSource
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
@@ -20,7 +20,6 @@ import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.SimTime
-import com.ashcroft.ripple.core.model.TraitKind
 import com.ashcroft.ripple.core.world.AshcroftNav
 
 /**
@@ -51,7 +50,8 @@ class SimulationEngine(
         for (event in socials) resolveSocial(event, byId, state.seed, now)
 
         val people = state.people.map { byId.getValue(it.id) }
-        return state.copy(clock = now, people = people)
+        val chronicle = Chronicler.update(state.people, people, state.chronicle, now)
+        return state.copy(clock = now, people = people, chronicle = chronicle)
     }
 
     fun run(state: WorldState, minutes: Int): WorldState {
@@ -73,11 +73,12 @@ class SimulationEngine(
         now: SimTime,
     ): Advance {
         val effective = effectiveActivity(person)
-        val withNeeds = person.copy(
+        val perceived = person.copy(
             needs = NeedDynamics.tick(person.needs, effective),
             knowledge = Perception.observe(person, everyone, now),
             emotions = person.emotions.decayed(1),
         )
+        val withNeeds = applyRecall(perceived, everyone, now)
 
         val mustDecide = withNeeds.action.phase.isTerminal || reconsider(withNeeds, now)
         if (mustDecide) {
@@ -86,6 +87,42 @@ class SimulationEngine(
             return applyDecision(withNeeds.copy(goals = result.goals, lastDecision = result.record), result.action, now)
         }
         return Advance(advanceAction(withNeeds, now), social = null)
+    }
+
+    /**
+     * Bring a memory to mind if the present moment calls for one, letting it
+     * colour the person's feelings (and, through those, their next choice). Only
+     * a contextually relevant memory surfaces, and only its recall stats and the
+     * rememberer's emotions change — never the objective record.
+     */
+    private fun applyRecall(person: Person, everyone: List<Person>, now: SimTime): Person {
+        if (person.memories.isEmpty()) return person.copy(recalledMemoryId = null)
+        val present = everyone.filter { it.location.roomId == person.location.roomId && it.id != person.id }
+            .map { it.id }.toSet()
+        val rumourSubjects = person.knowledge.all.filter { it.isRumour }.mapNotNull { subjectOf(it.claim.topic) }.toSet()
+        val ctx = MemoryRecall.Context(
+            room = person.location.roomId,
+            presentPeople = present,
+            currentVerb = person.action.verb.takeIf { person.action.isPerforming },
+            strongestEmotion = person.emotions.strongest,
+            goalSubjects = person.goals.mapNotNull { (it.target as? GoalTarget.Person)?.id }.toSet(),
+            goalTypes = person.goals.map { it.type }.toSet(),
+            rumourSubjects = rumourSubjects,
+        )
+        val result = MemoryRecall.recall(person, ctx, now)
+        val recalled = result.recalled ?: return person.copy(recalledMemoryId = null)
+        return person.copy(
+            memories = person.memories.map { if (it.id == recalled.id) it.recalled(now) else it },
+            emotions = person.emotions.stirred(result.emotionDeltas),
+            recalledMemoryId = recalled.id,
+        )
+    }
+
+    private fun subjectOf(topic: FactTopic): PersonId? = when (topic) {
+        is FactTopic.Whereabouts -> topic.person
+        is FactTopic.PersonMood -> topic.person
+        is FactTopic.NotableGuest -> topic.person
+        is FactTopic.RoomOccupancy -> null
     }
 
     private fun applyDecision(person: Person, action: ActionState, now: SimTime): Advance {
@@ -139,10 +176,10 @@ class SimulationEngine(
         val actor = byId[event.actor] ?: return
         val target = byId[event.target] ?: return
         if (target.location.roomId != actor.location.roomId) {
+            // They set out to talk to someone who has since moved on.
             byId[event.actor] = failSocial(actor, event.target, now)
             return
         }
-        val willingness = recipientWillingness(target, actor)
         val roll = DeterministicRandom(
             DeterministicRandom.seedOf(
                 seed,
@@ -151,28 +188,18 @@ class SimulationEngine(
                 now.epochMinutes,
             ),
         ).nextFloat()
-        if (roll < willingness.coerceIn(0.05f, 0.95f)) {
-            val present = byId.values.filter { it.location.roomId == actor.location.roomId }.map { it.id }.toSet()
-            val shared = sharedBeliefs(actor, present, now)
-            byId[event.actor] = actor.copy(
-                needs = actor.needs.with(NeedKind.SOCIAL, actor.needs[NeedKind.SOCIAL] + 0.12f),
-                memories = remember(actor, MemoryKind.HAD_PLEASANT_CHAT, target.id, valence = 0.6, importance = 0.5, now = now),
-                acquaintances = actor.acquaintances + target.id,
-                relationships = actor.relationships.adjust(target.id, WARMED_INITIATOR),
-                emotions = actor.emotions.stirred(mapOf(EmotionKind.HAPPINESS to 0.15, EmotionKind.LONELINESS to -0.2)),
-            )
-            byId[event.target] = target.copy(
-                needs = target.needs.with(NeedKind.SOCIAL, target.needs[NeedKind.SOCIAL] + 0.08f),
-                memories = remember(target, MemoryKind.HAD_PLEASANT_CHAT, actor.id, valence = 0.5, importance = 0.4, now = now),
-                acquaintances = target.acquaintances + actor.id,
-                relationships = target.relationships.adjust(actor.id, WARMED_RECIPIENT),
-                emotions = target.emotions.stirred(mapOf(EmotionKind.HAPPINESS to 0.1, EmotionKind.LONELINESS to -0.15)),
-                // The recipient picks up what the initiator mentions — second-hand, so held as rumour.
-                knowledge = shared.fold(target.knowledge) { kb, belief -> kb.learn(belief) },
+        val present = byId.values.filter { it.location.roomId == actor.location.roomId }.map { it.id }.toSet()
+        val (updatedActor, updatedTarget) = ConversationSystem.converse(actor, target, present, roll, now)
+        // A refused overture is a failed action; anything received lets the action run its course.
+        byId[event.actor] = if (updatedActor.lastConversation?.reception == ConversationReception.REFUSED) {
+            updatedActor.copy(
+                action = updatedActor.action.copy(phase = ActionPhase.FAILED),
+                behaviour = updatedActor.behaviour.recordFailure(updatedActor.action.signature()),
             )
         } else {
-            byId[event.actor] = failSocial(actor, event.target, now)
+            updatedActor
         }
+        byId[event.target] = updatedTarget
     }
 
     private fun failSocial(actor: Person, target: PersonId, now: SimTime): Person = actor.copy(
@@ -185,47 +212,6 @@ class SimulationEngine(
             mapOf(EmotionKind.EMBARRASSMENT to 0.2, EmotionKind.FRUSTRATION to 0.12, EmotionKind.LONELINESS to 0.05),
         ),
     )
-
-    /**
-     * The single belief the initiator brings up — news the listener probably
-     * cannot see for themselves: a notable arrival if they know of one, else
-     * something about a person or place *not* in the room. The recipient takes it
-     * on at reduced confidence, so a stale or mistaken belief spreads as a rumour.
-     */
-    private fun sharedBeliefs(actor: Person, present: Set<PersonId>, now: SimTime): List<Belief> {
-        val elsewhere = actor.knowledge.all.filter { belief ->
-            when (val topic = belief.claim.topic) {
-                is FactTopic.NotableGuest -> true
-                is FactTopic.Whereabouts -> topic.person !in present
-                is FactTopic.PersonMood -> topic.person !in present
-                is FactTopic.RoomOccupancy -> topic.room != actor.location.roomId
-            }
-        }
-        // Lead with any notable arrival, then the things they are most sure of.
-        val picks = (
-            elsewhere.filter { it.claim.topic is FactTopic.NotableGuest } +
-                elsewhere.sortedByDescending { it.confidence }
-        ).distinctBy { it.topicKey }.take(SHARE_LIMIT)
-        return picks.map { pick ->
-            Belief(
-                claim = pick.claim,
-                confidence = (pick.confidence * HEARSAY_DECAY).coerceIn(0.0, 1.0),
-                source = InformationSource.CONVERSATION,
-                acquiredAt = now,
-                fromPerson = actor.id,
-            )
-        }
-    }
-
-    private fun recipientWillingness(target: Person, actor: Person): Float {
-        val base = target.personality[TraitKind.SOCIABILITY] * 0.5f
-        val loneliness = (1f - target.needs[NeedKind.SOCIAL]) * 0.35f
-        val busy = if (target.action.verb == ActionVerb.WORK && target.schedule.any { it.kind == CommitmentKind.SHIFT }) -0.25f else 0f
-        val sentiment = target.sentimentToward(actor.id).coerceIn(-0.5, 0.5).toFloat() * 0.3f
-        val known = if (target.acquaintances.contains(actor.id)) 0.1f else 0f
-        val warmth = target.relationships.with(actor.id).warmth().coerceIn(-0.5, 0.5).toFloat() * 0.2f
-        return base + loneliness + busy + sentiment + known + warmth
-    }
 
     private fun remember(
         owner: Person,
@@ -277,20 +263,8 @@ class SimulationEngine(
     private companion object {
         const val URGENT_FLOOR = 0.12f
         const val MAX_MEMORIES = 40
-        const val HEARSAY_DECAY = 0.6
-        const val SHARE_LIMIT = 2
 
-        // A good exchange warms several axes at once — never a single friendship score.
-        val WARMED_INITIATOR = mapOf(
-            RelationDimension.FAMILIARITY to 0.06,
-            RelationDimension.AFFECTION to 0.04,
-            RelationDimension.TRUST to 0.02,
-        )
-        val WARMED_RECIPIENT = mapOf(
-            RelationDimension.FAMILIARITY to 0.06,
-            RelationDimension.AFFECTION to 0.03,
-            RelationDimension.TRUST to 0.015,
-        )
+        // A rebuffed overture leaves a small sting — a little resentment, and a face now known.
         val REBUFFED = mapOf(
             RelationDimension.FAMILIARITY to 0.02,
             RelationDimension.RESENTMENT to 0.05,

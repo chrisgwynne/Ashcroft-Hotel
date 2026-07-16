@@ -7,6 +7,7 @@ import com.ashcroft.ripple.core.model.ActionPhase
 import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.DecisionRecord
+import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.Goal
 import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.GoalType
@@ -14,12 +15,15 @@ import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.NeedKind
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
+import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.RoleKind
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.SimTime
+import com.ashcroft.ripple.core.model.Tendencies
 import com.ashcroft.ripple.core.rendering.HotelScene
 import com.ashcroft.ripple.core.rendering.PersonMarker
 import com.ashcroft.ripple.core.simulation.AshcroftScenario
+import com.ashcroft.ripple.core.simulation.Inspectors
 import com.ashcroft.ripple.core.simulation.SimulationEngine
 import com.ashcroft.ripple.core.simulation.WorldState
 import com.ashcroft.ripple.core.world.AshcroftLayout
@@ -130,6 +134,7 @@ class HotelViewModel
                 whyOpen = whyOpen && selected?.lastDecision != null,
                 developerMode = developerMode,
                 why = if (whyOpen) selected?.lastDecision?.let { whyView(it) } else null,
+                chronicle = Inspectors.chronicle(world).takeLast(CHRONICLE_VIEW),
             )
         }
 
@@ -171,7 +176,81 @@ class HotelViewModel
                 topSupport = chosen?.topPositive()?.explanationKey,
                 topConflict = chosen?.topNegative()?.explanationKey,
                 needs = readouts(person),
+                feeling = feelingOf(person),
+                tendencies = Tendencies.of(person).map { it.label },
+                relationships = importantRelationships(person),
+                knows = readableBeliefs(person),
+                recentMemories = person.memories.takeLast(THREE).map(::readableMemory),
+                recalledMemory = person.recalledMemoryId?.let { id -> person.memories.firstOrNull { it.id == id } }?.let(::readableMemory),
+                lastConversation = person.lastConversation?.summary,
+                developerBeliefs = if (developerMode) Inspectors.beliefs(world, person.id) else emptyList(),
+                developerRumours = if (developerMode) Inspectors.rumours(world, person.id) else emptyList(),
+                developerFalseBeliefs = if (developerMode) Inspectors.falseBeliefs(world, person.id) else emptyList(),
             )
+        }
+
+        private fun feelingOf(person: Person): String? = when (person.emotions.strongest) {
+            EmotionKind.HAPPINESS -> "In good spirits"
+            EmotionKind.EXCITEMENT -> "Buoyant"
+            EmotionKind.CONFIDENCE -> "Self-assured"
+            EmotionKind.ANXIETY -> "On edge"
+            EmotionKind.FRUSTRATION -> "Out of patience"
+            EmotionKind.EMBARRASSMENT -> "Flustered"
+            EmotionKind.LONELINESS -> "Lonely"
+            EmotionKind.GUILT -> "Weighed down"
+            null -> null
+        }
+
+        private fun importantRelationships(person: Person): List<String> =
+            person.relationships.all
+                .sortedByDescending { it[RelationDimension.FAMILIARITY] }
+                .take(THREE)
+                .map { rel ->
+                    val warmth = rel[RelationDimension.AFFECTION] + rel[RelationDimension.TRUST] - rel[RelationDimension.RESENTMENT]
+                    val tone = when {
+                        warmth > 0.3 -> "warm"
+                        warmth < -0.15 -> "strained"
+                        rel[RelationDimension.FAMILIARITY] > 0.3 -> "familiar"
+                        else -> "acquainted"
+                    }
+                    "${personName(rel.other)} — $tone"
+                }
+
+        // What the person believes, phrased as their picture — never the hidden truth.
+        private fun readableBeliefs(person: Person): List<String> =
+            person.knowledge.all
+                .sortedByDescending { it.confidence }
+                .take(FOUR)
+                .map { belief ->
+                    val hedge = if (belief.isRumour) "has heard" else "believes"
+                    when (val topic = belief.claim.topic) {
+                        is com.ashcroft.ripple.core.model.FactTopic.NotableGuest -> "$hedge a notable guest is staying"
+                        is com.ashcroft.ripple.core.model.FactTopic.Whereabouts ->
+                            "$hedge ${personName(topic.person)} is in ${roomName(RoomId(belief.claim.value))}"
+                        is com.ashcroft.ripple.core.model.FactTopic.PersonMood ->
+                            "$hedge ${personName(topic.person)} seems ${belief.claim.value}"
+                        is com.ashcroft.ripple.core.model.FactTopic.RoomOccupancy ->
+                            "$hedge ${roomName(topic.room)} is ${belief.claim.value}"
+                    }
+                }
+
+        private fun readableMemory(memory: com.ashcroft.ripple.core.model.Memory): String {
+            val who = memory.subjectId?.let(::personName)
+            val verb = when (memory.kind) {
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_HELPED -> "was helped by"
+                com.ashcroft.ripple.core.model.MemoryKind.HELPED_SOMEONE -> "helped"
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_IGNORED -> "was brushed off by"
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_INTERRUPTED -> "was interrupted by"
+                com.ashcroft.ripple.core.model.MemoryKind.HAD_PLEASANT_CHAT -> "had a good chat with"
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_PRAISED -> "was praised by"
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_EMBARRASSED -> "was embarrassed in front of"
+                com.ashcroft.ripple.core.model.MemoryKind.WAS_THANKED -> "was thanked by"
+                com.ashcroft.ripple.core.model.MemoryKind.SHARED_NEWS -> "shared news with"
+                com.ashcroft.ripple.core.model.MemoryKind.WORKED_WELL -> "had a good shift"
+                com.ashcroft.ripple.core.model.MemoryKind.GRANTED_FAVOUR -> "did a favour for"
+                com.ashcroft.ripple.core.model.MemoryKind.LEARNED_SOMETHING -> "learned something"
+            }
+            return if (who != null) "$verb $who" else verb
         }
 
         private fun whyView(record: DecisionRecord): WhyView {
@@ -293,5 +372,8 @@ class HotelViewModel
 
         private companion object {
             const val TICK_MS = 450L
+            const val THREE = 3
+            const val FOUR = 4
+            const val CHRONICLE_VIEW = 6
         }
     }

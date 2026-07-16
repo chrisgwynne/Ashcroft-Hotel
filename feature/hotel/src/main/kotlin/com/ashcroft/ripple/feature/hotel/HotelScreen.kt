@@ -112,6 +112,14 @@ private fun HotelHeader(state: HotelUiState) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            state.chronicle.lastOrNull()?.let { latest ->
+                Text(
+                    text = "Chronicle: $latest",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     }
 }
@@ -179,6 +187,7 @@ private fun PersonPanel(person: PersonView, onWhy: () -> Unit) {
             person.topSupport?.let { Hint("Draws them: $it", top = 4) }
             person.topConflict?.let { Hint("Pulls against it: $it", top = 2) }
             NeedsRow(person.needs)
+            SocialSection(person)
             FilledTonalButton(
                 onClick = onWhy,
                 modifier = Modifier.padding(top = 10.dp),
@@ -233,6 +242,22 @@ private fun WhyPanel(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SocialSection(person: PersonView) {
+    person.feeling?.let { Hint("Feeling: $it", top = 6) }
+    person.recalledMemory?.let { Hint("Just remembered: $it", top = 2) }
+    person.lastConversation?.let { Hint("Last exchange: $it", top = 2) }
+    BulletSection("They tend to", person.tendencies)
+    BulletSection("They know", person.relationships)
+    BulletSection("What they believe", person.knows)
+    BulletSection("Recently", person.recentMemories)
+    if (person.developerBeliefs.isNotEmpty() || person.developerFalseBeliefs.isNotEmpty()) {
+        BulletSection("· dev · beliefs vs truth", person.developerBeliefs)
+        BulletSection("· dev · rumours held", person.developerRumours)
+        BulletSection("· dev · false beliefs", person.developerFalseBeliefs)
     }
 }
 

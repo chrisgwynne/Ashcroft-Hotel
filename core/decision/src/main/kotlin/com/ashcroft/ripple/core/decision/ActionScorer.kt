@@ -5,9 +5,11 @@ import com.ashcroft.ripple.core.model.ActionScore
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.DeterministicRandom
+import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.GoalType
 import com.ashcroft.ripple.core.model.NeedKind
+import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.ScoreComponent
 import com.ashcroft.ripple.core.model.ScoreComponentType
 import com.ashcroft.ripple.core.model.TraitKind
@@ -31,6 +33,7 @@ class ActionScorer {
         commitmentFulfilment(candidate, context, components)
         goalProgress(candidate, context, components)
         personalityFit(candidate, actor, components)
+        emotionalFit(candidate, actor, components)
         habitAndRepetition(candidate, actor, components)
         socialFactors(candidate, context, components)
         costs(candidate, context, components)
@@ -119,15 +122,54 @@ class ActionScorer {
     private fun socialFactors(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
         val target = candidate.targetPerson ?: return
         val perceived = ctx.perceivedPeople.firstOrNull { it.id == target }
-        val sentiment = perceived?.sentiment ?: 0.0
-        if (abs(sentiment) > 1e-6) {
-            out += ScoreComponent(ScoreComponentType.RELATIONSHIP_IMPACT, sentiment * RELATIONSHIP_WEIGHT, sentimentExplanation(sentiment))
+        // Combine the remembered feeling (Phase 3) with the multidimensional bond (Phase 4):
+        // warmth and trust draw people together; resentment and fear hold them back.
+        val rel = ctx.actor.relationships.with(target)
+        val bond = rel[RelationDimension.AFFECTION] + rel[RelationDimension.TRUST] + rel[RelationDimension.GRATITUDE] -
+            rel[RelationDimension.RESENTMENT] - rel[RelationDimension.FEAR]
+        val impact = (perceived?.sentiment ?: 0.0) + bond
+        if (abs(impact) > 1e-6) {
+            out += ScoreComponent(ScoreComponentType.RELATIONSHIP_IMPACT, impact * RELATIONSHIP_WEIGHT, sentimentExplanation(impact))
         }
         // Approaching anyone carries a little uncertainty; a stranger, a little social risk.
         out += ScoreComponent(ScoreComponentType.UNCERTAINTY, -UNCERTAINTY_COST, "they might not be receptive")
         if (perceived?.alreadyKnown == false) {
             out += ScoreComponent(ScoreComponentType.SOCIAL_RISK, -SOCIAL_RISK_COST, "they do not know this person yet")
         }
+    }
+
+    /**
+     * Current feeling nudges choices: buoyant or lonely people reach out, anxious
+     * or embarrassed ones hold back and retreat, frustration sours work, confidence
+     * sweetens it. Emotions bias, never dictate — the weights are deliberately small.
+     */
+    private fun emotionalFit(candidate: ActionCandidate, actor: com.ashcroft.ripple.core.model.Person, out: MutableList<ScoreComponent>) {
+        val e = actor.emotions
+        var value = 0.0
+        if (candidate.verb.social) {
+            value += (
+                e[EmotionKind.HAPPINESS] + e[EmotionKind.EXCITEMENT] + e[EmotionKind.LONELINESS] -
+                    e[EmotionKind.ANXIETY] - e[EmotionKind.EMBARRASSMENT]
+            ) * EMOTION_SOCIAL_WEIGHT
+        }
+        if (candidate.verb == ActionVerb.WORK) {
+            value += (e[EmotionKind.CONFIDENCE] - e[EmotionKind.FRUSTRATION]) * EMOTION_WORK_WEIGHT
+        }
+        if (candidate.verb == ActionVerb.RETURN_HOME || candidate.verb == ActionVerb.RELAX) {
+            value += (e[EmotionKind.ANXIETY] + e[EmotionKind.EMBARRASSMENT]) * EMOTION_RETREAT_WEIGHT
+        }
+        if (abs(value) > 1e-6) out += ScoreComponent(ScoreComponentType.EMOTIONAL_FIT, value, emotionExplanation(e.strongest))
+    }
+
+    private fun emotionExplanation(strongest: EmotionKind?): String = when (strongest) {
+        EmotionKind.HAPPINESS, EmotionKind.EXCITEMENT -> "they are in good spirits"
+        EmotionKind.LONELINESS -> "they are feeling alone"
+        EmotionKind.ANXIETY -> "they feel on edge"
+        EmotionKind.EMBARRASSMENT -> "they are still smarting from earlier"
+        EmotionKind.FRUSTRATION -> "they are out of patience"
+        EmotionKind.CONFIDENCE -> "they feel sure of themselves"
+        EmotionKind.GUILT -> "something is weighing on them"
+        null -> "their mood colours it"
     }
 
     private fun costs(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
@@ -199,6 +241,9 @@ class ActionScorer {
         const val COMMITMENT_WEIGHT = 0.5
         const val PERSONALITY_WEIGHT = 0.4
         const val RELATIONSHIP_WEIGHT = 0.6
+        const val EMOTION_SOCIAL_WEIGHT = 0.25
+        const val EMOTION_WORK_WEIGHT = 0.2
+        const val EMOTION_RETREAT_WEIGHT = 0.2
         const val HABIT_STEP = 0.03
         const val BOREDOM_STEP = 0.06
         const val FAILURE_STEP = 0.06

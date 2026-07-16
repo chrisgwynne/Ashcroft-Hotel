@@ -43,6 +43,18 @@ data class PersonView(
     val topSupport: String?,
     val topConflict: String?,
     val needs: List<NeedReadout>,
+    // Phase 4 — the inner social life, shown as observation, never raw numbers.
+    val feeling: String?,
+    val tendencies: List<String>,
+    val relationships: List<String>,
+    val knows: List<String>,
+    val recentMemories: List<String>,
+    val recalledMemory: String?,
+    val lastConversation: String?,
+    // Developer mode only: the hidden machinery (beliefs vs truth, rumours, false beliefs).
+    val developerBeliefs: List<String>,
+    val developerRumours: List<String>,
+    val developerFalseBeliefs: List<String>,
 )
 
 /** A plausible alternative the person weighed, and why it lost. */
@@ -74,6 +86,7 @@ data class HotelUiState(
     val whyOpen: Boolean,
     val developerMode: Boolean,
     val why: WhyView?,
+    val chronicle: List<String>,
 )
 
 data class FloorOption(val level: Int, val label: String)
