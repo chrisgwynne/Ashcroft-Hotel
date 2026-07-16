@@ -73,7 +73,7 @@ benchmark               Macrobenchmark module (runs on device; Phase 7)
 
 ## Tech stack
 
-- Kotlin 2.2.21, Jetpack Compose (stable BOM), Material 3 with a custom look
+- Kotlin 2.2.10 (AGP 9 built-in Kotlin), Jetpack Compose (stable BOM), Material 3 with a custom look
 - **AGP 9.2.1**, Gradle 9.4.1, JDK 17 target, `compileSdk`/`targetSdk` 36,
   `minSdk` 28
 - Hilt, Room, DataStore, Coroutines/StateFlow, Kotlinx Serialization, KSP
