@@ -1,0 +1,61 @@
+build:
+  maxIssues: 0
+  excludeCorrectable: false
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+complexity:
+  active: true
+  LongParameterList:
+    active: true
+    functionThreshold: 8
+    constructorThreshold: 12
+    ignoreDefaultParameters: true
+  TooManyFunctions:
+    active: false
+  LongMethod:
+    active: true
+    threshold: 80
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 20
+
+style:
+  active: true
+  MagicNumber:
+    active: false
+  ReturnCount:
+    active: true
+    max: 6
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  UnusedPrivateMember:
+    active: true
+  WildcardImport:
+    active: false
+  ForbiddenComment:
+    active: false
+
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    # Composable functions are PascalCase.
+    ignoreAnnotated: ['Composable']
+  MatchingDeclarationName:
+    # We intentionally group small related top-level declarations per file.
+    active: false
+
+performance:
+  SpreadOperator:
+    # Used to pass the (empty in Phase 1) Room migration array; intentional.
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: false
