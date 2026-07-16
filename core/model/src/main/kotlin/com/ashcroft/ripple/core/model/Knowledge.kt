@@ -74,6 +74,8 @@ data class Belief(
     val source: InformationSource,
     val acquiredAt: SimTime,
     val fromPerson: PersonId? = null,
+    /** The causal record of how this belief was acquired, if tracked. */
+    val causeId: CauseId? = null,
 ) {
     val topicKey: String get() = claim.topic.key
 

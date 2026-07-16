@@ -6,6 +6,9 @@ import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.ActivityKind
 import com.ashcroft.ripple.core.model.Belief
+import com.ashcroft.ripple.core.model.CauseId
+import com.ashcroft.ripple.core.model.CauseRelation
+import com.ashcroft.ripple.core.model.CauseType
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.ConversationReception
 import com.ashcroft.ripple.core.model.DeterministicRandom
@@ -50,17 +53,39 @@ class SimulationEngine(
         val now = state.clock + 1
         val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks)
         val decider = DecisionMaker(world)
+        val log = CauseLog(now)
 
-        val advanced = state.people.map { advance(it, state.people, world, decider, state.seed, now) }
+        val advanced = state.people.map { advance(it, state.people, world, decider, state.seed, now, log) }
         val byId = advanced.associate { it.person.id to it.person }.toMutableMap()
         val socials = advanced.mapNotNull { it.social }.sortedBy { it.actor.value }
-        for (event in socials) resolveSocial(event, byId, state.seed, now)
+        for (event in socials) resolveSocial(event, byId, state.seed, now, log)
 
-        val resolvedTasks = resolveTasks(byId, state.tasks, now)
+        val resolvedTasks = resolveTasks(byId, state.tasks, now, log)
         val people = state.people.map { byId.getValue(it.id) }
         val tasks = HotelOperations.generate(layout, people, resolvedTasks, now)
+        recordNewTasks(state.tasks, tasks, log)
         val chronicle = Chronicler.update(state.people, people, state.chronicle, now)
-        return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks)
+        val merged = log.foldInto(state.causes)
+        // Prune only when the cap is exceeded, back to a lower watermark, so the O(n)
+        // prune runs rarely rather than every tick.
+        val causes = if (merged.size > GRAPH_CAP) merged.prunedTo(GRAPH_LOW) else merged
+        return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks, causes = causes)
+    }
+
+    /** A cause node for each task the operation newly opened, so its resolution can trace back to it. */
+    private fun recordNewTasks(before: List<HotelTask>, after: List<HotelTask>, log: CauseLog) {
+        val known = before.map { it.id }.toSet()
+        for (task in after.filter { it.id !in known }) {
+            log.emit(
+                CauseType.TASK_CREATED,
+                summaryKey = "task.${task.type.name.lowercase()}",
+                significance = task.priority * 0.4,
+                actors = task.requestedBy?.let { setOf(it) } ?: emptySet(),
+                subjects = setOf("task:${task.id.value}"),
+                location = task.locationId,
+                metadata = mapOf("id" to task.id.value, "type" to task.type.name),
+            )
+        }
     }
 
     /**
@@ -69,14 +94,22 @@ class SimulationEngine(
      * both remember it, gratitude and goodwill grow — which is how ordinary work
      * puts staff and guests together.
      */
-    private fun resolveTasks(byId: MutableMap<PersonId, Person>, tasks: List<HotelTask>, now: SimTime): List<HotelTask> {
+    private fun resolveTasks(byId: MutableMap<PersonId, Person>, tasks: List<HotelTask>, now: SimTime, log: CauseLog): List<HotelTask> {
         val open = tasks.associateBy { it.id }.toMutableMap()
         for (person in byId.values.sortedBy { it.id.value }) {
             val action = person.action
             if (action.verb != ActionVerb.ATTEND || action.phase != ActionPhase.COMPLETED) continue
             val task = action.targetTaskId?.let { open[it] } ?: continue
             if (!task.isOpen) continue
-            open[task.id] = task.copy(status = HotelTaskStatus.COMPLETED, assignedTo = person.id)
+            val completedCause = log.emit(
+                CauseType.TASK_COMPLETED,
+                summaryKey = "task.completed.${task.type.name.lowercase()}",
+                significance = task.priority * 0.5,
+                actors = setOf(person.id),
+                subjects = setOf("task:${task.id.value}"),
+                location = task.locationId,
+            )
+            open[task.id] = task.copy(status = HotelTaskStatus.COMPLETED, assignedTo = person.id, causeIds = task.causeIds + completedCause)
             byId[person.id] = person.copy(
                 needs = person.needs.with(NeedKind.RECOGNITION, person.needs[NeedKind.RECOGNITION] + 0.05f),
                 tendencyEvidence = person.tendencyEvidence + (Tendencies.HELP to (person.tendencyEvidence[Tendencies.HELP] ?: 0) + 1),
@@ -89,26 +122,71 @@ class SimulationEngine(
             val requesterId = task.requestedBy
             val requester = requesterId?.let { byId[it] }
             if (task.type.guestFacing && requester != null && requester.location.roomId == task.locationId) {
-                // Prompt service lifts the guest's satisfaction (more so for those who value speed).
-                val bump = if (requester.stay?.expectations?.contains(GuestValue.SPEED) == true) 0.08 else 0.05
-                byId[requesterId] = requester.copy(
-                    memories = remember(requester, MemoryKind.WAS_HELPED, person.id, valence = 0.5, importance = 0.4, now = now),
-                    relationships = requester.relationships.adjust(
-                        person.id,
-                        mapOf(RelationDimension.GRATITUDE to 0.08, RelationDimension.FAMILIARITY to 0.05),
-                    ),
-                    acquaintances = requester.acquaintances + person.id,
-                    stay = requester.stay?.let { it.copy(satisfaction = (it.satisfaction + bump).coerceAtMost(1.0)) },
-                )
-                val server = byId.getValue(person.id)
-                byId[person.id] = server.copy(
-                    memories = remember(server, MemoryKind.HELPED_SOMEONE, requesterId, 0.4, 0.3, now),
-                    relationships = server.relationships.adjust(requesterId, mapOf(RelationDimension.FAMILIARITY to 0.05)),
-                    acquaintances = server.acquaintances + requesterId,
-                )
+                serveGuest(task, person.id, requesterId, byId, now, log, completedCause)
             }
         }
         return open.values.toList()
+    }
+
+    /** A guest-facing task finished with the guest present: record the service and its consequences. */
+    private fun serveGuest(
+        task: HotelTask,
+        serverId: PersonId,
+        requesterId: PersonId,
+        byId: MutableMap<PersonId, Person>,
+        now: SimTime,
+        log: CauseLog,
+        completedCause: CauseId,
+    ) {
+        val requester = byId.getValue(requesterId)
+        val service = log.emit(
+            CauseType.SERVICE_INTERACTION,
+            summaryKey = "service.${task.type.name.lowercase()}",
+            significance = 0.4,
+            actors = setOf(serverId, requesterId),
+            location = task.locationId,
+            parents = listOf(completedCause to CauseRelation.CAUSED),
+        )
+        val memCause = log.emit(
+            CauseType.MEMORY_CREATED,
+            summaryKey = "memory.was_helped",
+            significance = 0.3,
+            actors = setOf(requesterId),
+            parents = listOf(service to CauseRelation.CAUSED),
+        )
+        log.emit(
+            CauseType.SATISFACTION_CHANGE,
+            summaryKey = "satisfaction.served",
+            significance = 0.2,
+            actors = setOf(requesterId),
+            parents = listOf(service to CauseRelation.CAUSED),
+        )
+        val bump = if (requester.stay?.expectations?.contains(GuestValue.SPEED) == true) 0.08 else 0.05
+        byId[requesterId] = stampLastMemory(
+            requester.copy(
+                memories = remember(requester, MemoryKind.WAS_HELPED, serverId, valence = 0.5, importance = 0.4, now = now),
+                relationships = requester.relationships.adjust(
+                    serverId,
+                    mapOf(RelationDimension.GRATITUDE to 0.08, RelationDimension.FAMILIARITY to 0.05),
+                ),
+                acquaintances = requester.acquaintances + serverId,
+                stay = requester.stay?.let { it.copy(satisfaction = (it.satisfaction + bump).coerceAtMost(1.0)) },
+            ),
+            memCause,
+        )
+        val server = byId.getValue(serverId)
+        byId[serverId] = server.copy(
+            memories = remember(server, MemoryKind.HELPED_SOMEONE, requesterId, 0.4, 0.3, now),
+            relationships = server.relationships.adjust(requesterId, mapOf(RelationDimension.FAMILIARITY to 0.05)),
+            acquaintances = server.acquaintances + requesterId,
+        )
+    }
+
+    /** Attach a cause to the memory a sub-step just created (the most recent, still-unstamped one). */
+    private fun stampLastMemory(person: Person, causeId: CauseId): Person {
+        val memories = person.memories
+        if (memories.isEmpty() || memories.last().causeId != null) return person
+        return person.copy(memories = memories.dropLast(1) + memories.last().copy(causeId = causeId))
     }
 
     /**
@@ -155,6 +233,7 @@ class SimulationEngine(
         decider: DecisionMaker,
         seed: Long,
         now: SimTime,
+        log: CauseLog,
     ): Advance {
         val effective = effectiveActivity(person)
         val perceived = person.copy(
@@ -167,12 +246,26 @@ class SimulationEngine(
                 it.copy(satisfaction = it.satisfaction + (SATISFACTION_BASELINE - it.satisfaction) * SATISFACTION_DRIFT)
             },
         )
-        val withNeeds = applyRecall(perceived, everyone, now)
+        val withNeeds = applyRecall(perceived, everyone, now, log)
 
         val mustDecide = withNeeds.action.phase.isTerminal || reconsider(withNeeds, now)
         if (mustDecide) {
             val commitments = withNeeds.schedule.filter { it.isActiveAt(now.minuteOfDay) }
             val result = decider.decide(withNeeds, commitments, now, seed)
+            // A selected decision is a cause, linked to the memories that materially informed it.
+            val memoryCauses = withNeeds.memories
+                .filter { it.id in result.record.relevantMemoryIds && it.causeId != null }
+                .mapNotNull { it.causeId }
+                .map { it to CauseRelation.MOTIVATED }
+            log.emit(
+                CauseType.DECISION,
+                summaryKey = "decision.${result.action.verb.name.lowercase()}",
+                significance = DECISION_SIGNIFICANCE,
+                actors = setOf(person.id),
+                location = withNeeds.location.roomId,
+                metadata = mapOf("verb" to result.action.verb.name),
+                parents = memoryCauses,
+            )
             return applyDecision(withNeeds.copy(goals = result.goals, lastDecision = result.record), result.action, now)
         }
         return Advance(advanceAction(withNeeds, now), social = null)
@@ -184,7 +277,7 @@ class SimulationEngine(
      * a contextually relevant memory surfaces, and only its recall stats and the
      * rememberer's emotions change — never the objective record.
      */
-    private fun applyRecall(person: Person, everyone: List<Person>, now: SimTime): Person {
+    private fun applyRecall(person: Person, everyone: List<Person>, now: SimTime, log: CauseLog): Person {
         if (person.memories.isEmpty()) return person.copy(recalledMemoryId = null)
         val present = everyone.filter { it.location.roomId == person.location.roomId && it.id != person.id }
             .map { it.id }.toSet()
@@ -200,6 +293,17 @@ class SimulationEngine(
         )
         val result = MemoryRecall.recall(person, ctx, now)
         val recalled = result.recalled ?: return person.copy(recalledMemoryId = null)
+        // Recall is a cause in its own right, remembered from the original moment.
+        if (result.emotionDeltas.isNotEmpty()) {
+            log.emit(
+                CauseType.MEMORY_RECALLED,
+                summaryKey = "recall.${recalled.kind.name.lowercase()}",
+                significance = recalled.importance * 0.4,
+                actors = setOf(person.id),
+                location = person.location.roomId,
+                parents = recalled.causeId?.let { listOf(it to CauseRelation.REMEMBERED_FROM) } ?: emptyList(),
+            )
+        }
         return person.copy(
             memories = person.memories.map { if (it.id == recalled.id) it.recalled(now) else it },
             emotions = person.emotions.stirred(result.emotionDeltas),
@@ -261,7 +365,7 @@ class SimulationEngine(
         return person.copy(action = a.copy(phase = ActionPhase.IN_PROGRESS, startedAt = now, elapsedMinutes = 0))
     }
 
-    private fun resolveSocial(event: PendingSocial, byId: MutableMap<PersonId, Person>, seed: Long, now: SimTime) {
+    private fun resolveSocial(event: PendingSocial, byId: MutableMap<PersonId, Person>, seed: Long, now: SimTime, log: CauseLog) {
         val actor = byId[event.actor] ?: return
         val target = byId[event.target] ?: return
         if (target.location.roomId != actor.location.roomId) {
@@ -279,16 +383,59 @@ class SimulationEngine(
         ).nextFloat()
         val present = byId.values.filter { it.location.roomId == actor.location.roomId }.map { it.id }.toSet()
         val (updatedActor, updatedTarget) = ConversationSystem.converse(actor, target, present, roll, now)
+
+        // The exchange is a cause; the memories and relationship shifts it produced hang off it.
+        val convCause = log.emit(
+            CauseType.CONVERSATION_ACT,
+            summaryKey = "conversation.${updatedActor.lastConversation?.act?.name?.lowercase() ?: "talk"}",
+            significance = CONVERSATION_SIGNIFICANCE,
+            actors = setOf(actor.id, target.id),
+            location = actor.location.roomId,
+            metadata = mapOf("reception" to (updatedActor.lastConversation?.reception?.name ?: "")),
+        )
+        val actorStamped = recordConversationEffects(actor, updatedActor, target.id, convCause, log)
+        byId[event.target] = recordConversationEffects(target, updatedTarget, actor.id, convCause, log)
+
         // A refused overture is a failed action; anything received lets the action run its course.
-        byId[event.actor] = if (updatedActor.lastConversation?.reception == ConversationReception.REFUSED) {
-            updatedActor.copy(
-                action = updatedActor.action.copy(phase = ActionPhase.FAILED),
-                behaviour = updatedActor.behaviour.recordFailure(updatedActor.action.signature()),
+        byId[event.actor] = if (actorStamped.lastConversation?.reception == ConversationReception.REFUSED) {
+            actorStamped.copy(
+                action = actorStamped.action.copy(phase = ActionPhase.FAILED),
+                behaviour = actorStamped.behaviour.recordFailure(actorStamped.action.signature()),
             )
         } else {
-            updatedActor
+            actorStamped
         }
-        byId[event.target] = updatedTarget
+    }
+
+    /** Attach causes to the memory and relationship changes a conversation produced for one party. */
+    private fun recordConversationEffects(before: Person, after: Person, other: PersonId, convCause: CauseId, log: CauseLog): Person {
+        var result = after
+        if (after.memories.size > before.memories.size) {
+            val memCause = log.emit(
+                CauseType.MEMORY_CREATED,
+                summaryKey = "memory.${after.memories.last().kind.name.lowercase()}",
+                significance = after.memories.last().importance * 0.4,
+                actors = setOf(after.id),
+                parents = listOf(convCause to CauseRelation.CAUSED),
+            )
+            result = stampLastMemory(result, memCause)
+        }
+        // Group all the axis moves from this one exchange into a single relationship-change node.
+        val moved = RelationDimension.entries.filter {
+            kotlin.math.abs(after.relationships.with(other)[it] - before.relationships.with(other)[it]) > REL_MATERIAL
+        }
+        if (moved.isNotEmpty()) {
+            log.emit(
+                CauseType.RELATIONSHIP_CHANGE,
+                summaryKey = "relationship.shift",
+                significance = REL_CHANGE_SIGNIFICANCE,
+                actors = setOf(after.id),
+                subjects = setOf("person:${other.value}"),
+                metadata = mapOf("axes" to moved.joinToString(",") { it.name.lowercase() }),
+                parents = listOf(convCause to CauseRelation.CAUSED),
+            )
+        }
+        return result
     }
 
     private fun failSocial(actor: Person, target: PersonId, now: SimTime): Person = actor.copy(
@@ -355,6 +502,12 @@ class SimulationEngine(
         const val HANDOVER_FIDELITY = 0.9
         const val SATISFACTION_BASELINE = 0.45
         const val SATISFACTION_DRIFT = 0.0004
+        const val DECISION_SIGNIFICANCE = 0.3
+        const val CONVERSATION_SIGNIFICANCE = 0.35
+        const val REL_CHANGE_SIGNIFICANCE = 0.3
+        const val REL_MATERIAL = 0.03
+        const val GRAPH_CAP = 6_000
+        const val GRAPH_LOW = 4_000
 
         // A rebuffed overture leaves a small sting — a little resentment, and a face now known.
         val REBUFFED = mapOf(

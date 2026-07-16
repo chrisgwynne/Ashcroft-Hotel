@@ -53,6 +53,8 @@ data class Memory(
     val confidence: Double = 1.0,
     val lastRecalledAt: SimTime? = null,
     val recallCount: Int = 0,
+    /** The causal record of the moment that created this memory, if tracked. */
+    val causeId: CauseId? = null,
 ) {
     /** How this memory currently colours the owner's feeling toward [subjectId]. */
     fun sentiment(): Double = valence * importance * confidence

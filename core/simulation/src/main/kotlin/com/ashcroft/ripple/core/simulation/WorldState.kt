@@ -1,5 +1,6 @@
 package com.ashcroft.ripple.core.simulation
 
+import com.ashcroft.ripple.core.model.CausalGraph
 import com.ashcroft.ripple.core.model.ChronicleEntry
 import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.Person
@@ -19,6 +20,7 @@ data class WorldState(
     val people: List<Person>,
     val chronicle: List<ChronicleEntry> = emptyList(),
     val tasks: List<HotelTask> = emptyList(),
+    val causes: CausalGraph = CausalGraph(),
 ) {
     fun person(id: PersonId): Person? = people.firstOrNull { it.id == id }
 
