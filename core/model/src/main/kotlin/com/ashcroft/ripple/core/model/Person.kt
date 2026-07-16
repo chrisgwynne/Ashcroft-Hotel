@@ -72,7 +72,12 @@ data class Person(
     val tendencyEvidence: Map<String, Int> = emptyMap(),
     /** For a guest, why they are here and how the stay is going; null for staff. */
     val stay: GuestStay? = null,
+    /** Recent conversational contexts, used to damp repeating the same exchange. */
+    val conversationLog: List<ConversationContextSignature> = emptyList(),
 ) {
+    /** How often this person has recently had a like-for-like exchange with [other]. */
+    fun recentExchangesWith(other: PersonId): Int = conversationLog.count { it.recipientId == other && !it.taskDriven }
+
     val name: String get() = identity.name
 
     /**

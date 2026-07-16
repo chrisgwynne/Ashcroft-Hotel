@@ -161,8 +161,14 @@ internal object ConversationSystem {
                 a = a.feel(EmotionKind.EMBARRASSMENT, 0.15)
             }
             ConversationAct.PRAISE -> if (accepted) {
-                t = t.remember(MemoryKind.WAS_PRAISED, actor.id, 0.7, 0.5, now)
-                    .warmTo(actor.id, RelationDimension.AFFECTION, 0.05).feel(EmotionKind.CONFIDENCE, 0.10)
+                t = t.remember(MemoryKind.WAS_PRAISED, actor.id, 0.7, 0.5, now).feel(EmotionKind.CONFIDENCE, 0.10)
+                // The same praise lands differently: warmth in most, a flicker of
+                // suspicion in the guarded — so relationship axes diverge, never move as one.
+                t = if (t.personality[TraitKind.AGREEABLENESS] < 0.35f) {
+                    t.warmTo(actor.id, RelationDimension.RESPECT, 0.02).warmTo(actor.id, RelationDimension.RESENTMENT, 0.03)
+                } else {
+                    t.warmTo(actor.id, RelationDimension.AFFECTION, 0.05)
+                }
             }
             ConversationAct.REASSURE -> if (accepted) {
                 t = t.calm(EmotionKind.ANXIETY, 0.4).warmTo(actor.id, RelationDimension.TRUST, 0.05)
@@ -188,9 +194,17 @@ internal object ConversationSystem {
 
         val summary = summarise(act, reception, target.name)
         val topic = if (act.carriesInformation()) news(actor, present, now).firstOrNull()?.topicKey else null
+        val signature = com.ashcroft.ripple.core.model.ConversationContextSignature(
+            recipientId = target.id,
+            act = act,
+            subjectKey = topic,
+            locationId = actor.location.roomId,
+            taskDriven = false,
+        )
         a = a.copy(
             lastConversation = ConversationRecord(target.id, true, act, reception, now, topic, null, summary),
             acquaintances = a.acquaintances + target.id,
+            conversationLog = (a.conversationLog + signature).takeLast(CONVERSATION_LOG),
         )
         t = t.copy(
             lastConversation = ConversationRecord(actor.id, false, act, reception, now, topic, null, mirror(act, reception, actor.name)),
@@ -223,8 +237,17 @@ internal object ConversationSystem {
 
     // --- Small Person transforms -------------------------------------------------------------
 
-    private fun Person.warmTo(other: PersonId, dim: RelationDimension, delta: Double): Person =
-        copy(relationships = relationships.adjust(other, mapOf(dim to delta)))
+    /**
+     * Warm (or cool) a relationship axis, with the change *saturating*: the closer
+     * an axis already is to its extreme, the less each further exchange moves it.
+     * This is what stops ordinary repeated pleasantries from drifting every bond
+     * to maximum warmth — affection has to be earned, and plateaus.
+     */
+    private fun Person.warmTo(other: PersonId, dim: RelationDimension, delta: Double): Person {
+        val current = relationships.with(other)[dim]
+        val room = if (delta >= 0) 1.0 - current else 1.0 + current
+        return copy(relationships = relationships.adjust(other, mapOf(dim to delta * room.coerceIn(0.0, 1.0))))
+    }
 
     private fun Person.tally(key: String): Person =
         copy(tendencyEvidence = tendencyEvidence + (key to (tendencyEvidence[key] ?: 0) + 1))
@@ -300,6 +323,7 @@ internal object ConversationSystem {
     private const val HEARSAY_DECAY = 0.6
     private const val SHARE_LIMIT = 2
     private const val MAX_MEMORIES = 40
+    private const val CONVERSATION_LOG = 10
     private const val MISUNDERSTAND_BAND = 0.18f
     private val NEUTRAL_ON_REFUSAL = setOf(
         ConversationAct.COMPLAIN,

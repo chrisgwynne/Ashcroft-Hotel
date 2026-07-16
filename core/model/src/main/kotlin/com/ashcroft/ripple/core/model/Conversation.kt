@@ -27,6 +27,21 @@ enum class ConversationAct(val opener: Boolean = false) {
     REBUFF,
 }
 
+/**
+ * A compact fingerprint of the *context* an exchange happened in: who, what act,
+ * about what, where, and toward which goal or task. Two exchanges with the same
+ * signature are "the same conversation again" — used to damp repeated chains
+ * when nothing has changed, while leaving task-driven repetition alone.
+ */
+@Serializable
+data class ConversationContextSignature(
+    val recipientId: PersonId,
+    val act: ConversationAct,
+    val subjectKey: String? = null,
+    val locationId: RoomId? = null,
+    val taskDriven: Boolean = false,
+)
+
 /** How the recipient received the act. Choosing to speak never guarantees a welcome. */
 @Serializable
 enum class ConversationReception {

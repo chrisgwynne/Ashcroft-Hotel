@@ -149,6 +149,13 @@ class ActionScorer {
         if (perceived?.alreadyKnown == false) {
             out += ScoreComponent(ScoreComponentType.SOCIAL_RISK, -SOCIAL_RISK_COST, "they do not know this person yet")
         }
+        // Diminishing relevance: having just talked with someone repeatedly, there is
+        // less pull to do it again unless something has changed. Task-driven contact is
+        // tracked separately and is not damped here.
+        val repeats = ctx.actor.recentExchangesWith(target)
+        if (repeats > 0) {
+            out += ScoreComponent(ScoreComponentType.RECENT_REPETITION, -min(repeats, 5) * REPEAT_STEP, "they have talked recently")
+        }
     }
 
     /**
@@ -260,6 +267,7 @@ class ActionScorer {
         const val HABIT_STEP = 0.03
         const val BOREDOM_STEP = 0.06
         const val FAILURE_STEP = 0.06
+        const val REPEAT_STEP = 0.09
         const val UNCERTAINTY_COST = 0.05
         const val SOCIAL_RISK_COST = 0.10
         const val TIME_COST_STEP = 0.01

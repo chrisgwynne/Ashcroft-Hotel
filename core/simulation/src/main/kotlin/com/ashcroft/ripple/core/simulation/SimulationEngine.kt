@@ -156,7 +156,7 @@ class SimulationEngine(
         val perceived = person.copy(
             needs = NeedDynamics.tick(person.needs, effective),
             knowledge = Perception.observe(person, everyone, now),
-            emotions = person.emotions.decayed(1),
+            emotions = EmotionDynamics.tick(person),
         )
         val withNeeds = applyRecall(perceived, everyone, now)
 
