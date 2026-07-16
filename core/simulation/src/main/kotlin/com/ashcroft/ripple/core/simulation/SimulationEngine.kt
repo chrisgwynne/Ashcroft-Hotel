@@ -5,6 +5,7 @@ import com.ashcroft.ripple.core.model.ActionPhase
 import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.ActivityKind
+import com.ashcroft.ripple.core.model.Belief
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.ConversationReception
 import com.ashcroft.ripple.core.model.DeterministicRandom
@@ -14,6 +15,8 @@ import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.HotelTaskStatus
+import com.ashcroft.ripple.core.model.HotelTaskType
+import com.ashcroft.ripple.core.model.InformationSource
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
@@ -77,6 +80,11 @@ class SimulationEngine(
                 needs = person.needs.with(NeedKind.RECOGNITION, person.needs[NeedKind.RECOGNITION] + 0.05f),
                 tendencyEvidence = person.tendencyEvidence + (Tendencies.HELP to (person.tendencyEvidence[Tendencies.HELP] ?: 0) + 1),
             )
+            if (task.type == HotelTaskType.SHIFT_HANDOVER) {
+                val outgoing = task.requestedBy?.let { byId[it] }
+                if (outgoing != null) byId[person.id] = handoverKnowledge(byId.getValue(person.id), outgoing, now)
+                continue
+            }
             val requesterId = task.requestedBy
             val requester = requesterId?.let { byId[it] }
             if (task.type.guestFacing && requester != null && requester.location.roomId == task.locationId) {
@@ -97,6 +105,33 @@ class SimulationEngine(
             }
         }
         return open.values.toList()
+    }
+
+    /**
+     * A handover passes on what the outgoing member knows — but only what the
+     * incoming member does not already hold more firmly. If nothing is new, the
+     * handover communicates nothing (it was already known); otherwise the incoming
+     * member takes it on at near-full fidelity and remembers being briefed.
+     */
+    private fun handoverKnowledge(incoming: Person, outgoing: Person, now: SimTime): Person {
+        var kb = incoming.knowledge
+        var learned = 0
+        for (belief in outgoing.knowledge.all) {
+            if (!kb.knows(belief.claim.topic)) learned++
+            val relayed = Belief(
+                belief.claim,
+                (belief.confidence * HANDOVER_FIDELITY).coerceIn(0.0, 1.0),
+                InformationSource.CONVERSATION,
+                now,
+                outgoing.id,
+            )
+            kb = kb.learn(relayed)
+        }
+        return if (learned == 0) {
+            incoming
+        } else {
+            incoming.copy(knowledge = kb, memories = remember(incoming, MemoryKind.LEARNED_SOMETHING, outgoing.id, 0.2, 0.3, now))
+        }
     }
 
     fun run(state: WorldState, minutes: Int): WorldState {
@@ -308,6 +343,7 @@ class SimulationEngine(
     private companion object {
         const val URGENT_FLOOR = 0.12f
         const val MAX_MEMORIES = 40
+        const val HANDOVER_FIDELITY = 0.9
 
         // A rebuffed overture leaves a small sting — a little resentment, and a face now known.
         val REBUFFED = mapOf(

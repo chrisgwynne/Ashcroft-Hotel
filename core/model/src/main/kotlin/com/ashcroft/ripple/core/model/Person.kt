@@ -70,6 +70,8 @@ data class Person(
      * personality tendencies are inferred — never raw trait numbers.
      */
     val tendencyEvidence: Map<String, Int> = emptyMap(),
+    /** For a guest, why they are here and how the stay is going; null for staff. */
+    val stay: GuestStay? = null,
 ) {
     val name: String get() = identity.name
 

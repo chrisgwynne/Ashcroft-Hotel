@@ -5,6 +5,8 @@ import com.ashcroft.ripple.core.model.BehaviourHistory
 import com.ashcroft.ripple.core.model.Commitment
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.GridCell
+import com.ashcroft.ripple.core.model.GuestStay
+import com.ashcroft.ripple.core.model.GuestValue
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.Identity
 import com.ashcroft.ripple.core.model.LifeStage
@@ -17,6 +19,7 @@ import com.ashcroft.ripple.core.model.Personality
 import com.ashcroft.ripple.core.model.RoleKind
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.SimTime
+import com.ashcroft.ripple.core.model.StayPurpose
 import com.ashcroft.ripple.core.model.TraitKind
 import com.ashcroft.ripple.core.model.WorldPos
 import com.ashcroft.ripple.core.world.AshcroftLayout
@@ -68,19 +71,19 @@ object AshcroftScenario {
                 Personality.of(TraitKind.PATIENCE to 0.8f, TraitKind.OPENNESS to 0.4f),
             ),
             guest(
-                "ethan", "Ethan Carter", 41, "room_102", layout, listOf(mealCommitment()),
+                "ethan", "Ethan Carter", 41, "room_102", layout, StayPurpose.BUSINESS,
                 Personality.of(TraitKind.AMBITION to 0.7f, TraitKind.SOCIABILITY to 0.5f),
             ),
             guest(
-                "sophie", "Sophie Bell", 26, "room_101", layout, listOf(appointment("lobby", 10, 11), mealCommitment()),
+                "sophie", "Sophie Bell", 26, "room_101", layout, StayPurpose.INTERVIEW,
                 Personality.of(TraitKind.CONSCIENTIOUSNESS to 0.8f, TraitKind.EXTRAVERSION to 0.4f),
             ),
             guest(
-                "naomi", "Naomi Harris", 38, "room_104", layout, listOf(mealCommitment()),
+                "naomi", "Naomi Harris", 38, "room_104", layout, StayPurpose.HOLIDAY,
                 Personality.of(TraitKind.AGREEABLENESS to 0.6f, TraitKind.SOCIABILITY to 0.55f),
             ),
             guest(
-                "paul", "Paul Harris", 40, "room_104", layout, listOf(mealCommitment()),
+                "paul", "Paul Harris", 40, "room_104", layout, StayPurpose.VISITING_FAMILY,
                 Personality.of(TraitKind.PATIENCE to 0.35f, TraitKind.AGREEABLENESS to 0.5f),
             ),
         )
@@ -125,7 +128,10 @@ object AshcroftScenario {
     ): Person = person(id, name, age, LifeStage.ADULT, role, homeRoom, schedule, layout, personality, startRoom = "staff_room")
 
     private fun resident(id: String, name: String, age: Int, homeRoom: String, layout: HotelLayout, personality: Personality): Person =
-        person(id, name, age, LifeStage.ELDER, RoleKind.RESIDENT, homeRoom, emptyList(), layout, personality, startRoom = homeRoom)
+        person(
+            id, name, age, LifeStage.ELDER, RoleKind.RESIDENT, homeRoom, emptyList(), layout, personality, startRoom = homeRoom,
+            stay = GuestStay(StayPurpose.RETREAT, checkoutDay = STAY_LENGTH, expectations = expectationsFor(StayPurpose.RETREAT)),
+        )
 
     private fun guest(
         id: String,
@@ -133,9 +139,34 @@ object AshcroftScenario {
         age: Int,
         homeRoom: String,
         layout: HotelLayout,
-        schedule: List<Commitment>,
+        purpose: StayPurpose,
         personality: Personality,
-    ): Person = person(id, name, age, LifeStage.ADULT, RoleKind.GUEST, homeRoom, schedule, layout, personality, startRoom = homeRoom)
+    ): Person = person(
+        id, name, age, LifeStage.ADULT, RoleKind.GUEST, homeRoom,
+        purposeRoutine(purpose) + mealCommitment(), layout, personality, startRoom = homeRoom,
+        stay = GuestStay(purpose, checkoutDay = STAY_LENGTH, expectations = expectationsFor(purpose)),
+    )
+
+    /** A guest's daily routine follows their reason for staying — never a script. */
+    private fun purposeRoutine(purpose: StayPurpose): List<Commitment> = when (purpose) {
+        StayPurpose.BUSINESS -> listOf(appointment("lobby", 9, 10), appointment("bar", 21, 22))
+        StayPurpose.HOLIDAY -> listOf(appointment("lobby", 15, 16), appointment("bar", 20, 22))
+        StayPurpose.INTERVIEW -> listOf(appointment("lobby", 11, 12))
+        StayPurpose.VISITING_FAMILY -> listOf(appointment("restaurant", 13, 14), appointment("lobby", 16, 17))
+        StayPurpose.FUNCTION -> listOf(appointment("restaurant", 18, 20))
+        StayPurpose.TEMPORARY -> listOf(appointment("reception", 9, 10))
+        StayPurpose.RETREAT -> emptyList()
+    }
+
+    private fun expectationsFor(purpose: StayPurpose): Set<GuestValue> = when (purpose) {
+        StayPurpose.BUSINESS -> setOf(GuestValue.SPEED, GuestValue.QUIET, GuestValue.VALUE_FOR_MONEY)
+        StayPurpose.HOLIDAY -> setOf(GuestValue.FRIENDLINESS, GuestValue.LUXURY)
+        StayPurpose.INTERVIEW -> setOf(GuestValue.SPEED, GuestValue.RECOGNITION)
+        StayPurpose.VISITING_FAMILY -> setOf(GuestValue.FRIENDLINESS, GuestValue.CLEANLINESS)
+        StayPurpose.FUNCTION -> setOf(GuestValue.LUXURY, GuestValue.RECOGNITION)
+        StayPurpose.TEMPORARY -> setOf(GuestValue.VALUE_FOR_MONEY, GuestValue.SPEED)
+        StayPurpose.RETREAT -> setOf(GuestValue.PRIVACY, GuestValue.QUIET)
+    }
 
     private fun person(
         id: String,
@@ -148,6 +179,7 @@ object AshcroftScenario {
         layout: HotelLayout,
         personality: Personality,
         startRoom: String,
+        stay: GuestStay? = null,
     ): Person {
         val start = startLocation(layout, startRoom)
         return Person(
@@ -172,8 +204,11 @@ object AshcroftScenario {
             location = start,
             action = ActionState.IDLE,
             lastDecision = null,
+            stay = stay,
         )
     }
+
+    private const val STAY_LENGTH = 400L
 
     private fun startLocation(layout: HotelLayout, roomId: String): LocationState {
         val room = layout.room(RoomId(roomId)) ?: layout.allRooms.first()
