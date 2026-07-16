@@ -54,9 +54,10 @@ fun HotelScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (state.whyOpen && state.why != null) {
+            val why = state.why
+            if (state.whyOpen && why != null) {
                 WhyPanel(
-                    why = state.why,
+                    why = why,
                     developerMode = state.developerMode,
                     onToggleDeveloperMode = viewModel::toggleDeveloperMode,
                     onClose = viewModel::toggleWhy,
