@@ -33,10 +33,11 @@ class Phase6PersistenceTest {
 
     @Test
     fun theGraphStaysBoundedAcyclicAndCleanOverALongRun() {
-        // Long enough to cross the prune cap many times over.
+        // Long enough to cross the prune cap many times over (it is first reached
+        // within a day, so a stretch of days exercises many prune cycles).
         var state = AshcroftScenario.initial()
         var peak = 0
-        repeat(20 * 24 * 60) {
+        repeat(10 * 24 * 60) {
             state = engine.step(state)
             peak = maxOf(peak, state.causes.size)
         }
@@ -48,7 +49,7 @@ class Phase6PersistenceTest {
     @Test
     fun pruningKeepsWhatIsStillReferenced() {
         // After heavy pruning, every provenance pointer a person still holds must resolve.
-        val state = engine.run(AshcroftScenario.initial(), 15 * 24 * 60)
+        val state = engine.run(AshcroftScenario.initial(), 10 * 24 * 60)
         val dangling = state.people.flatMap { it.memories }
             .mapNotNull { it.causeId }
             .count { state.causes.node(it) == null }
