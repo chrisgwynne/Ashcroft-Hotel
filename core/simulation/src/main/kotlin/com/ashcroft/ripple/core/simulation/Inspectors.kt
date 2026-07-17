@@ -1,10 +1,13 @@
 package com.ashcroft.ripple.core.simulation
 
 import com.ashcroft.ripple.core.model.CausalGraph
+import com.ashcroft.ripple.core.model.Department
 import com.ashcroft.ripple.core.model.EmotionKind
+import com.ashcroft.ripple.core.model.EntityId
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.SimTime
+import com.ashcroft.ripple.core.model.department
 import kotlinx.serialization.json.Json
 
 /**
@@ -120,6 +123,118 @@ object Inspectors {
         }
     }
 
+    // --- Long-arc identity windows (Phase 7G) ------------------------------------------------
+
+    /**
+     * How [observer] regards [subject], socially and professionally — each axis a
+     * running mean with the confidence behind it, and each standing carrying the
+     * count of evidence it was built from. This is a *belief*, not a truth; another
+     * observer may hold a different one.
+     */
+    fun standingHeld(state: WorldState, observer: PersonId, subject: PersonId): List<String> {
+        val holder = state.person(observer) ?: return emptyList()
+        val out = mutableListOf<String>()
+        holder.standings.personalOf(subject)?.let { s ->
+            out += "socially (${s.sourceEvidenceIds.size} pieces of evidence):"
+            out += s.dimensions.entries.sortedByDescending { kotlin.math.abs(it.value.value) }
+                .map { "  ${it.key.name.lowercase()} ${round(it.value.value)} (conf ${round(it.value.confidence)})" }
+        }
+        holder.standings.professionalOf(subject)?.let { s ->
+            out += "professionally (${s.sourceEvidenceIds.size} pieces of evidence):"
+            out += s.dimensions.entries.sortedByDescending { kotlin.math.abs(it.value.value) }
+                .map { "  ${it.key.name.lowercase()} ${round(it.value.value)} (conf ${round(it.value.confidence)})" }
+        }
+        return out
+    }
+
+    /** The pronounced traits of a place's culture, each with the weight and evidence behind it. */
+    fun cultureOf(state: WorldState, entity: EntityId): List<String> {
+        val profile = state.culture.of(entity) ?: return emptyList()
+        val pronounced = profile.pronounced()
+        val header = "from ${profile.observations} observations, ${profile.sourceEvidenceIds.size} on record"
+        if (pronounced.isEmpty()) return listOf("$header — no settled character yet")
+        return listOf(header) + pronounced.entries.sortedByDescending { kotlin.math.abs(it.value.value) }
+            .map { "${it.key.name.lowercase()} ${round(it.value.value)} (weight ${round(it.value.weight)})" }
+    }
+
+    /** The customs a place has grown into, with each one's stage and how widely it is held. */
+    fun practicesOf(state: WorldState, entity: EntityId): List<String> =
+        state.practices.of(entity).values
+            .sortedByDescending { it.adoption }
+            .map { "${it.descriptor} — ${it.stage.name.lowercase()} (adoption ${round(it.adoption)})" }
+
+    /** A staff member's emergent career aspiration, with the evidence behind the recognition it rests on. */
+    fun aspirationOf(state: WorldState, id: PersonId): List<String> {
+        val aspiration = state.person(id)?.aspiration ?: return emptyList()
+        return listOf(
+            "focus: ${aspiration.focus.name.lowercase()}",
+            "drive ${round(aspiration.drive)}${if (aspiration.isPursuing) " (pursuing)" else ""}",
+            "demonstrated ${round(aspiration.demonstrated)}${if (aspiration.isProven) " (proven)" else ""}",
+            "recognition ${round(aspiration.recognition)} (${aspiration.sourceEvidenceIds.size} pieces of evidence)",
+        )
+    }
+
+    /** A read-only identity card for a person — who they are becoming, in the round. */
+    fun personIdentity(state: WorldState, id: PersonId): List<String> {
+        val person = state.person(id) ?: return emptyList()
+        val out = mutableListOf("${person.name} — ${person.role.name.lowercase().replace('_', ' ')}")
+        val settled = person.habits.settled()
+        if (settled.isNotEmpty()) {
+            out += "routines: " + settled.values.sortedByDescending { it.strength }
+                .take(IDENTITY_VIEW).joinToString(", ") { "${it.key} ${round(it.strength)}" }
+        }
+        person.aspiration?.takeIf { it.drive > 0.0 }?.let {
+            out += "aspiration: ${it.focus.name.lowercase()} drive ${round(it.drive)}"
+        }
+        return out
+    }
+
+    /** A read-only identity card for a department — its character and its customs. */
+    fun departmentIdentity(state: WorldState, department: Department): List<String> {
+        val entity = EntityId.department(department)
+        val members = state.people.count { it.role.isStaff && it.role.department() == department }
+        return listOf("The ${department.name.lowercase().replace('_', ' ')} — $members on the team") +
+            prefixed("character", cultureOf(state, entity)) +
+            prefixed("customs", practicesOf(state, entity))
+    }
+
+    /** A read-only identity card for the hotel as a whole. */
+    fun hotelIdentity(state: WorldState): List<String> =
+        listOf("The Ashcroft") +
+            prefixed("character", cultureOf(state, EntityId.HOTEL)) +
+            prefixed("customs", practicesOf(state, EntityId.HOTEL))
+
+    /**
+     * The "Why?" behind a person's last decision, told three ways: what *objectively*
+     * happened (the causal record), what the actor *believed* (the standings and
+     * perceptions they were acting on, which may be wrong), and what was *decisive*
+     * (the score components that actually tipped the balance). The three can, and
+     * often should, diverge — a decision can be objectively suboptimal yet perfectly
+     * reasonable given what the person believed.
+     */
+    fun whyThreeWays(state: WorldState, id: PersonId): Map<String, List<String>> {
+        val person = state.person(id) ?: return emptyMap()
+        val record = person.lastDecision ?: return emptyMap()
+        val objective = why(state, id)
+        val decisive = record.consideredActions.firstOrNull { it.candidate.id == record.chosenAction.id }
+            ?.components?.sortedByDescending { kotlin.math.abs(it.value) }
+            ?.take(DECISIVE_VIEW)
+            ?.map { "${it.type.name.lowercase()} ${round(it.value)} — ${it.explanationKey}" }
+            .orEmpty()
+        val believed = buildList {
+            val target = record.chosenAction.targetPerson
+            if (target != null) {
+                addAll(prefixed("of ${state.person(target)?.name ?: target.value}", standingHeld(state, id, target)))
+            }
+            person.aspiration?.takeIf { it.isPursuing }?.let { add("driven by their own aspiration to advance") }
+            if (isEmpty()) add("nothing about anyone else bore on it")
+        }
+        return mapOf("objective" to objective, "believed" to believed, "decisive" to decisive)
+    }
+
+    private fun prefixed(label: String, lines: List<String>): List<String> =
+        if (lines.isEmpty()) emptyList() else listOf("$label:") + lines.map { "  $it" }
+
     /** A portable snapshot of the causal record — the graph serialised as JSON. */
     fun exportCauses(state: WorldState): String = EXPORT_JSON.encodeToString(CausalGraph.serializer(), state.causes)
 
@@ -139,4 +254,6 @@ object Inspectors {
 
     private const val MEMORY_VIEW = 8
     private const val TYPE_VIEW = 8
+    private const val IDENTITY_VIEW = 4
+    private const val DECISIVE_VIEW = 4
 }

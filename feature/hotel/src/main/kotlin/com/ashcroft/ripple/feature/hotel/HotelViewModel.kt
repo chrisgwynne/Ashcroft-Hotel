@@ -7,6 +7,7 @@ import com.ashcroft.ripple.core.model.ActionPhase
 import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.DecisionRecord
+import com.ashcroft.ripple.core.model.Department
 import com.ashcroft.ripple.core.model.EmotionKind
 import com.ashcroft.ripple.core.model.Goal
 import com.ashcroft.ripple.core.model.GoalTarget
@@ -136,6 +137,12 @@ class HotelViewModel
                 why = if (whyOpen) selected?.lastDecision?.let { whyView(it) } else null,
                 chronicle = Inspectors.chronicle(world).takeLast(CHRONICLE_VIEW),
                 openTaskCount = Inspectors.openTaskCount(world),
+                developerHotelIdentity = if (developerMode) Inspectors.hotelIdentity(world) else emptyList(),
+                developerDepartments = if (developerMode) {
+                    Department.entries.flatMap { Inspectors.departmentIdentity(world, it) }
+                } else {
+                    emptyList()
+                },
             )
         }
 
@@ -190,6 +197,13 @@ class HotelViewModel
                 developerRumours = if (developerMode) Inspectors.rumours(world, person.id) else emptyList(),
                 developerFalseBeliefs = if (developerMode) Inspectors.falseBeliefs(world, person.id) else emptyList(),
                 developerHistory = if (developerMode) Inspectors.causalHistory(world, person.id).take(CAUSAL_VIEW) else emptyList(),
+                identity = Inspectors.personIdentity(world, person.id),
+                developerAspiration = if (developerMode) Inspectors.aspirationOf(world, person.id) else emptyList(),
+                developerWhyThreeWays = if (developerMode) {
+                    Inspectors.whyThreeWays(world, person.id).flatMap { (view, lines) -> listOf("$view:") + lines }
+                } else {
+                    emptyList()
+                },
             )
         }
 
@@ -320,6 +334,7 @@ class HotelViewModel
                 GoalType.SEEK_PRIVACY -> "find some privacy"
                 GoalType.IMPROVE_COMPETENCE -> "get better at something"
                 GoalType.SAVE_RESOURCES -> "be careful with money"
+                GoalType.ADVANCE_CAREER -> "make something of themselves here"
             }
         }
 

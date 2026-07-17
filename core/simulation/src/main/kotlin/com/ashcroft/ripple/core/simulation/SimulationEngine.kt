@@ -37,6 +37,7 @@ import com.ashcroft.ripple.core.model.PerceptionDimension
 import com.ashcroft.ripple.core.model.PerceptionWeights
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
+import com.ashcroft.ripple.core.model.PracticeRegistry
 import com.ashcroft.ripple.core.model.ProfessionalDimension
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.ReturnStage
@@ -85,7 +86,7 @@ class SimulationEngine(
         val (habituated, practices) = SocialLearning.apply(state.people, people, state.practices, now)
         // Careers grow from that record; leaders recognise whom they believe has earned it.
         val learned = Careers.apply(habituated, now)
-        val chronicle = recordChronicle(state.people, learned, state.chronicle, state.causes, now, log)
+        val chronicle = recordChronicle(state.people, learned, state.chronicle, state.causes, now, log, state.practices, practices)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, keeping the live present, everything
         // still referenced, and the most significant of the rest — so the O(n) prune
@@ -297,8 +298,10 @@ class SimulationEngine(
         graph: CausalGraph,
         now: SimTime,
         log: CauseLog,
+        practicesBefore: PracticeRegistry,
+        practicesAfter: PracticeRegistry,
     ): List<ChronicleEntry> {
-        val updated = Chronicler.update(before, current, previous, now)
+        val updated = Chronicler.update(before, current, previous, now, practicesBefore, practicesAfter)
         if (updated.size == previous.size) return updated
         val result = previous.toMutableList()
         for (entry in updated.drop(previous.size)) {

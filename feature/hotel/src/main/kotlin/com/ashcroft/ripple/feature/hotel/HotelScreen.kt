@@ -121,6 +121,14 @@ private fun HotelHeader(state: HotelUiState) {
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            (state.developerHotelIdentity + state.developerDepartments).forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
         }
     }
 }
@@ -255,6 +263,7 @@ private fun SocialSection(person: PersonView) {
     person.recalledMemory?.let { Hint("Just remembered: $it", top = 2) }
     person.lastConversation?.let { Hint("Last exchange: $it", top = 2) }
     BulletSection("They tend to", person.tendencies)
+    BulletSection("Who they're becoming", person.identity)
     BulletSection("They know", person.relationships)
     BulletSection("What they believe", person.knows)
     BulletSection("Recently", person.recentMemories)
@@ -263,6 +272,8 @@ private fun SocialSection(person: PersonView) {
         BulletSection("· dev · rumours held", person.developerRumours)
         BulletSection("· dev · false beliefs", person.developerFalseBeliefs)
         BulletSection("· dev · their history", person.developerHistory)
+        BulletSection("· dev · aspiration", person.developerAspiration)
+        BulletSection("· dev · why (three ways)", person.developerWhyThreeWays)
     }
 }
 

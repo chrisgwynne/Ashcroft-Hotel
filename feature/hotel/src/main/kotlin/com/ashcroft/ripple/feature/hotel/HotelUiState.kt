@@ -59,6 +59,11 @@ data class PersonView(
     val developerFalseBeliefs: List<String>,
     // Developer mode only: this person's causal history, newest first (Phase 6).
     val developerHistory: List<String> = emptyList(),
+    // Phase 7G — who this person is becoming: their settled routines and aspiration (read-only).
+    val identity: List<String> = emptyList(),
+    // Developer mode only: their career aspiration and the "Why?" read three ways.
+    val developerAspiration: List<String> = emptyList(),
+    val developerWhyThreeWays: List<String> = emptyList(),
 )
 
 /** A plausible alternative the person weighed, and why it lost. */
@@ -94,6 +99,9 @@ data class HotelUiState(
     val why: WhyView?,
     val chronicle: List<String>,
     val openTaskCount: Int,
+    // Phase 7G — the hotel's and departments' emergent identity, read-only (developer mode).
+    val developerHotelIdentity: List<String> = emptyList(),
+    val developerDepartments: List<String> = emptyList(),
 )
 
 data class FloorOption(val level: Int, val label: String)
