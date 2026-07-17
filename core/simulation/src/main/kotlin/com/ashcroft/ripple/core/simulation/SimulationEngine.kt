@@ -12,9 +12,13 @@ import com.ashcroft.ripple.core.model.CauseRelation
 import com.ashcroft.ripple.core.model.CauseType
 import com.ashcroft.ripple.core.model.ChronicleEntry
 import com.ashcroft.ripple.core.model.CommitmentKind
+import com.ashcroft.ripple.core.model.ConversationAct
 import com.ashcroft.ripple.core.model.ConversationReception
+import com.ashcroft.ripple.core.model.ConversationRecord
 import com.ashcroft.ripple.core.model.DeterministicRandom
 import com.ashcroft.ripple.core.model.EmotionKind
+import com.ashcroft.ripple.core.model.EntityId
+import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.FactTopic
 import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.GuestValue
@@ -30,8 +34,10 @@ import com.ashcroft.ripple.core.model.MemoryKind
 import com.ashcroft.ripple.core.model.NeedKind
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
+import com.ashcroft.ripple.core.model.ProfessionalDimension
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.SimTime
+import com.ashcroft.ripple.core.model.StandingDimension
 import com.ashcroft.ripple.core.model.Tendencies
 import com.ashcroft.ripple.core.world.AshcroftNav
 
@@ -57,24 +63,34 @@ class SimulationEngine(
         val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks)
         val decider = DecisionMaker(world)
         val log = CauseLog(now)
+        val evidence = EvidenceLog(now)
 
         val advanced = state.people.map { advance(it, state.people, world, decider, state.seed, now, log) }
         val byId = advanced.associate { it.person.id to it.person }.toMutableMap()
         val socials = advanced.mapNotNull { it.social }.sortedBy { it.actor.value }
-        for (event in socials) resolveSocial(event, byId, state.seed, now, log)
+        for (event in socials) resolveSocial(event, byId, state.seed, now, log, evidence)
 
-        val resolvedTasks = resolveTasks(byId, state.tasks, now, log)
+        val resolvedTasks = resolveTasks(byId, state.tasks, now, log, evidence)
         val peopleResolved = state.people.map { byId.getValue(it.id) }
         val generated = HotelOperations.generate(layout, peopleResolved, resolvedTasks, now)
         val tasks = recordNewTasks(state.tasks, generated, log)
-        val people = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log)
+        val served = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log, evidence)
+        // Evidence gathered this tick folds into the witnesses' observer-specific standings.
+        val people = applyEvidence(served, evidence)
         val chronicle = recordChronicle(state.people, people, state.chronicle, state.causes, now, log)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, keeping the live present, everything
         // still referenced, and the most significant of the rest — so the O(n) prune
         // runs rarely and forgets churn, not history.
         val causes = if (merged.size > GRAPH_CAP) merged.retain(GRAPH_LOW, GRAPH_RECENT, pinnedCauses(people, chronicle, tasks)) else merged
-        return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks, causes = causes)
+        return state.copy(
+            clock = now,
+            people = people,
+            chronicle = chronicle,
+            tasks = tasks,
+            causes = causes,
+            evidence = evidence.foldInto(state.evidence),
+        )
     }
 
     /**
@@ -128,6 +144,7 @@ class SimulationEngine(
         people: List<Person>,
         now: SimTime,
         log: CauseLog,
+        evidence: EvidenceLog,
     ): List<Person> {
         val wasOpen = before.filter { it.isOpen }.map { it.id }.toSet()
         val lapsed = after.filter {
@@ -163,6 +180,10 @@ class SimulationEngine(
             )
             // The consequence reflects back: the unattended task mattered because it soured a guest.
             log.reinforce(overdue, drop)
+            // The guest's view of the hotel — and the responsible department — takes a knock.
+            evidence.entity(EntityId.HOTEL, EvidenceDimension.RESPONSIVENESS, BAD, drop * 4, requesterId, setOf(overdue))
+            evidence.entity(EntityId.HOTEL, EvidenceDimension.RELIABILITY, BAD, drop * 3, requesterId, setOf(overdue))
+            evidence.entity(EntityId.department(task.department), EvidenceDimension.RELIABILITY, BAD, drop * 4, requesterId, setOf(overdue))
             byId[requesterId] = requester.copy(
                 stay = stay.copy(satisfaction = (stay.satisfaction - drop).coerceAtLeast(0.0)),
                 emotions = requester.emotions.stirred(mapOf(EmotionKind.FRUSTRATION to drop * 2)),
@@ -177,7 +198,13 @@ class SimulationEngine(
      * both remember it, gratitude and goodwill grow — which is how ordinary work
      * puts staff and guests together.
      */
-    private fun resolveTasks(byId: MutableMap<PersonId, Person>, tasks: List<HotelTask>, now: SimTime, log: CauseLog): List<HotelTask> {
+    private fun resolveTasks(
+        byId: MutableMap<PersonId, Person>,
+        tasks: List<HotelTask>,
+        now: SimTime,
+        log: CauseLog,
+        evidence: EvidenceLog,
+    ): List<HotelTask> {
         val open = tasks.associateBy { it.id }.toMutableMap()
         for (person in byId.values.sortedBy { it.id.value }) {
             val action = person.action
@@ -192,6 +219,7 @@ class SimulationEngine(
                 subjects = setOf("task:${task.id.value}"),
                 location = task.locationId,
             )
+            recordWorkEvidence(task, person.id, byId, completedCause, evidence)
             open[task.id] = task.copy(status = HotelTaskStatus.COMPLETED, assignedTo = person.id, causeIds = task.causeIds + completedCause)
             byId[person.id] = person.copy(
                 needs = person.needs.with(NeedKind.RECOGNITION, person.needs[NeedKind.RECOGNITION] + 0.05f),
@@ -205,10 +233,29 @@ class SimulationEngine(
             val requesterId = task.requestedBy
             val requester = requesterId?.let { byId[it] }
             if (task.type.guestFacing && requester != null && requester.location.roomId == task.locationId) {
-                serveGuest(task, person.id, requesterId, byId, now, log, completedCause)
+                serveGuest(task, person.id, requesterId, byId, now, log, completedCause, evidence)
             }
         }
         return open.values.toList()
+    }
+
+    /** Completing work is professional evidence — competence and reliability — for the staff who saw it. */
+    private fun recordWorkEvidence(
+        task: HotelTask,
+        workerId: PersonId,
+        byId: MutableMap<PersonId, Person>,
+        completedCause: CauseId,
+        evidence: EvidenceLog,
+    ) {
+        val observers = byId.values
+            .filter { it.role.isStaff && it.id != workerId && it.location.roomId == task.locationId }
+            .map { it.id }.toSet()
+        if (observers.isEmpty()) return
+        evidence.professional(workerId, ProfessionalDimension.COMPETENCE, GOOD, WORK_EVIDENCE, observers, setOf(completedCause))
+        evidence.professional(workerId, ProfessionalDimension.RELIABILITY, GOOD, WORK_EVIDENCE, observers, setOf(completedCause))
+        if (task.type == HotelTaskType.SHIFT_HANDOVER) {
+            evidence.professional(workerId, ProfessionalDimension.PUNCTUALITY, GOOD, WORK_EVIDENCE, observers, setOf(completedCause))
+        }
     }
 
     /**
@@ -266,6 +313,7 @@ class SimulationEngine(
         now: SimTime,
         log: CauseLog,
         completedCause: CauseId,
+        evidence: EvidenceLog,
     ) {
         val requester = byId.getValue(requesterId)
         val service = log.emit(
@@ -276,6 +324,18 @@ class SimulationEngine(
             location = task.locationId,
             parents = listOf(completedCause to CauseRelation.CAUSED),
         )
+        // The guest forms a firsthand opinion of the server; co-located staff judge the
+        // handling professionally; and the guest's view of the hotel warms a little.
+        evidence.personal(serverId, StandingDimension.RESPONSIVENESS, GOOD, SERVICE_EVIDENCE, requesterId, causes = setOf(service))
+        evidence.personal(serverId, StandingDimension.WARMTH, GOOD, SERVICE_EVIDENCE * 0.6, requesterId, causes = setOf(service))
+        val staffObservers = byId.values.filter { it.role.isStaff && it.id != serverId && it.location.roomId == task.locationId }
+            .map { it.id }.toSet()
+        if (staffObservers.isNotEmpty()) {
+            val cause = setOf(completedCause)
+            evidence.professional(serverId, ProfessionalDimension.GUEST_HANDLING, GOOD, SERVICE_EVIDENCE, staffObservers, cause)
+            evidence.professional(serverId, ProfessionalDimension.COMPETENCE, GOOD, SERVICE_EVIDENCE * 0.7, staffObservers, cause)
+        }
+        evidence.entity(EntityId.HOTEL, EvidenceDimension.RESPONSIVENESS, GOOD, SERVICE_EVIDENCE * 0.8, requesterId, setOf(service))
         val memCause = log.emit(
             CauseType.MEMORY_CREATED,
             summaryKey = "memory.was_helped",
@@ -540,7 +600,14 @@ class SimulationEngine(
         return person.copy(action = a.copy(phase = ActionPhase.IN_PROGRESS, startedAt = now, elapsedMinutes = 0))
     }
 
-    private fun resolveSocial(event: PendingSocial, byId: MutableMap<PersonId, Person>, seed: Long, now: SimTime, log: CauseLog) {
+    private fun resolveSocial(
+        event: PendingSocial,
+        byId: MutableMap<PersonId, Person>,
+        seed: Long,
+        now: SimTime,
+        log: CauseLog,
+        evidence: EvidenceLog,
+    ) {
         val actor = byId[event.actor] ?: return
         val target = byId[event.target] ?: return
         if (target.location.roomId != actor.location.roomId) {
@@ -570,6 +637,7 @@ class SimulationEngine(
         )
         val actorStamped = recordConversationEffects(actor, updatedActor, target.id, convCause, log)
         byId[event.target] = recordConversationEffects(target, updatedTarget, actor.id, convCause, log)
+        recordConversationEvidence(actor.id, target.id, updatedActor.lastConversation, present, convCause, evidence)
 
         // A refused overture is a failed action; anything received lets the action run its course.
         byId[event.actor] = if (actorStamped.lastConversation?.reception == ConversationReception.REFUSED) {
@@ -611,6 +679,55 @@ class SimulationEngine(
             )
         }
         return result
+    }
+
+    /**
+     * A conversation is evidence about the people in it: a hand offered reads as
+     * generosity and warmth, an agreed request as reliability, a bout of complaining
+     * as a lapse of calm, a rebuff as coldness. Whoever was in earshot forms a
+     * (weaker) view too. Nothing here decides a reputation — it records the basis.
+     */
+    private fun recordConversationEvidence(
+        actorId: PersonId,
+        targetId: PersonId,
+        record: ConversationRecord?,
+        present: Set<PersonId>,
+        convCause: CauseId,
+        evidence: EvidenceLog,
+    ) {
+        val conv = record ?: return
+        val witnesses = present - actorId - targetId
+        if (conv.reception == ConversationReception.REFUSED) {
+            if (conv.act !in NEUTRAL_ON_REFUSAL) {
+                evidence.personal(targetId, StandingDimension.WARMTH, BAD, CONVERSATION_EVIDENCE, actorId, causes = setOf(convCause))
+            }
+            return
+        }
+        if (conv.reception != ConversationReception.ACCEPTED) return
+        val c = setOf(convCause)
+        val w = witnesses
+        when (conv.act) {
+            ConversationAct.OFFER_HELP -> {
+                evidence.personal(actorId, StandingDimension.GENEROSITY, GOOD, CONVERSATION_EVIDENCE, targetId, w, c)
+                evidence.personal(actorId, StandingDimension.WARMTH, GOOD, CONVERSATION_EVIDENCE * 0.6, targetId, w, c)
+            }
+            ConversationAct.REQUEST_HELP -> {
+                evidence.personal(targetId, StandingDimension.RELIABILITY, GOOD, CONVERSATION_EVIDENCE, actorId, w, c)
+                evidence.personal(targetId, StandingDimension.WARMTH, GOOD, CONVERSATION_EVIDENCE * 0.6, actorId, w, c)
+            }
+            ConversationAct.THANK, ConversationAct.PRAISE ->
+                evidence.personal(actorId, StandingDimension.WARMTH, GOOD, CONVERSATION_EVIDENCE * 0.5, targetId, w, c)
+            ConversationAct.COMPLAIN ->
+                evidence.personal(actorId, StandingDimension.CALMNESS, BAD, CONVERSATION_EVIDENCE, targetId, w, c)
+            else -> Unit
+        }
+    }
+
+    private fun applyEvidence(people: List<Person>, evidence: EvidenceLog): List<Person> {
+        if (evidence.isEmpty) return people
+        val byId = people.associateBy { it.id }.toMutableMap()
+        evidence.applyStandings(byId)
+        return people.map { byId.getValue(it.id) }
     }
 
     private fun failSocial(actor: Person, target: PersonId, now: SimTime): Person = actor.copy(
@@ -690,6 +807,21 @@ class SimulationEngine(
         const val GRAPH_RECENT = 3_000
         const val CHRONICLE_REINFORCE = 0.2
         const val CHRONICLE_CAUSE_LIMIT = 6
+
+        // Evidence direction and per-event weights (Phase 7B).
+        const val GOOD = 1.0
+        const val BAD = -1.0
+        const val SERVICE_EVIDENCE = 1.0
+        const val WORK_EVIDENCE = 0.6
+        const val CONVERSATION_EVIDENCE = 0.8
+
+        // Conversation acts that carry no coldness when turned away (they were already prickly).
+        val NEUTRAL_ON_REFUSAL = setOf(
+            ConversationAct.COMPLAIN,
+            ConversationAct.DISAGREE,
+            ConversationAct.END_CONVERSATION,
+            ConversationAct.REBUFF,
+        )
         val CHRONICLE_SOURCE_TYPES = setOf(
             CauseType.RELATIONSHIP_CHANGE,
             CauseType.CONVERSATION_ACT,
