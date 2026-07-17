@@ -22,6 +22,8 @@ data class SelectedRoom(
     val kindLabel: String,
     val floorLabel: String,
     val occupants: List<String>,
+    /** Whether the player is currently following this room (Phase 8). */
+    val followed: Boolean = false,
 )
 
 data class NeedReadout(val label: String, val note: String, val level: Float)
@@ -64,6 +66,8 @@ data class PersonView(
     // Developer mode only: their career aspiration and the "Why?" read three ways.
     val developerAspiration: List<String> = emptyList(),
     val developerWhyThreeWays: List<String> = emptyList(),
+    /** Whether the player is currently following this person (Phase 8). */
+    val followed: Boolean = false,
 )
 
 /** A plausible alternative the person weighed, and why it lost. */
@@ -102,6 +106,9 @@ data class HotelUiState(
     // Phase 7G — the hotel's and departments' emergent identity, read-only (developer mode).
     val developerHotelIdentity: List<String> = emptyList(),
     val developerDepartments: List<String> = emptyList(),
+    // Phase 8 — the hotel's "pulse" (recent meaningful developments) and what the player follows.
+    val pulse: List<String> = emptyList(),
+    val following: List<String> = emptyList(),
 )
 
 data class FloorOption(val level: Int, val label: String)

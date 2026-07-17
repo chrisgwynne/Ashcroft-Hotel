@@ -24,17 +24,25 @@ import com.ashcroft.ripple.core.model.Tendencies
 import com.ashcroft.ripple.core.rendering.HotelScene
 import com.ashcroft.ripple.core.rendering.PersonMarker
 import com.ashcroft.ripple.core.simulation.AshcroftScenario
+import com.ashcroft.ripple.core.simulation.FollowProjector
+import com.ashcroft.ripple.core.simulation.FollowState
+import com.ashcroft.ripple.core.simulation.FollowTarget
 import com.ashcroft.ripple.core.simulation.Inspectors
+import com.ashcroft.ripple.core.simulation.Observation
+import com.ashcroft.ripple.core.simulation.PulseDetector
+import com.ashcroft.ripple.core.simulation.PulseEvent
 import com.ashcroft.ripple.core.simulation.SimulationEngine
 import com.ashcroft.ripple.core.simulation.WorldState
 import com.ashcroft.ripple.core.world.AshcroftLayout
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -61,6 +69,12 @@ class HotelViewModel
         private var whyOpen: Boolean = false
         private var developerMode: Boolean = false
 
+        // Phase 8 — the hotel's pulse (recent meaningful developments) and the player's follows.
+        private var follows: FollowState = FollowState.EMPTY
+        private var recentPulse: List<PulseEvent> = emptyList()
+        private var pulseAnchor: WorldState = world
+        private var jumping: Boolean = false
+
         private val _uiState = MutableStateFlow(project())
         val uiState: StateFlow<HotelUiState> = _uiState.asStateFlow()
 
@@ -69,11 +83,51 @@ class HotelViewModel
                 while (isActive) {
                     delay(TICK_MS)
                     val steps = timeSpeed.multiplier
-                    if (steps > 0) {
+                    if (steps > 0 && !jumping) {
                         repeat(steps) { world = engine.step(world) }
+                        harvestPulse()
                         _uiState.value = project()
                     }
                 }
+            }
+        }
+
+        /** Fold the meaningful developments since the last look into the rolling pulse. */
+        private fun harvestPulse() {
+            val fresh = PulseDetector.detect(pulseAnchor, world)
+            if (fresh.isNotEmpty()) {
+                recentPulse = (recentPulse + fresh).distinctBy { it.id }.takeLast(PULSE_KEEP)
+            }
+            pulseAnchor = world
+        }
+
+        /** Follow (or stop following) whatever is currently selected — a person or a room. */
+        fun toggleFollowSelected() {
+            val target: FollowTarget? = when {
+                selectedPersonId != null ->
+                    world.people.firstOrNull { it.id.value == selectedPersonId }?.let { FollowTarget.OfPerson(it.id) }
+                selectedRoomId != null -> selectedRoomId?.let { FollowTarget.OfRoom(it) }
+                else -> null
+            }
+            if (target != null) {
+                follows = if (follows.isFollowing(target)) follows.unfollow(target) else follows.follow(target)
+                _uiState.value = project()
+            }
+        }
+
+        /** Fast-forward the deterministic world to the next meaningful development. */
+        fun jumpToNextChange() {
+            if (jumping) return
+            jumping = true
+            viewModelScope.launch {
+                val jump = withContext(Dispatchers.Default) { Observation.jumpToNextChange(engine, world) }
+                world = jump.state
+                if (jump.events.isNotEmpty()) {
+                    recentPulse = (recentPulse + jump.events).distinctBy { it.id }.takeLast(PULSE_KEEP)
+                }
+                pulseAnchor = world
+                jumping = false
+                _uiState.value = project()
             }
         }
 
@@ -143,6 +197,8 @@ class HotelViewModel
                 } else {
                     emptyList()
                 },
+                pulse = recentPulse.takeLast(PULSE_SHOW).reversed().map { it.headline },
+                following = follows.targets.map { FollowProjector.digest(world, it, recentPulse).title },
             )
         }
 
@@ -164,6 +220,7 @@ class HotelViewModel
                 kindLabel = readable(room.kind.name),
                 floorLabel = floorName,
                 occupants = world.people.filter { it.location.roomId == id }.map { it.name },
+                followed = follows.isFollowing(FollowTarget.OfRoom(id)),
             )
         }
 
@@ -204,6 +261,7 @@ class HotelViewModel
                 } else {
                     emptyList()
                 },
+                followed = follows.isFollowing(FollowTarget.OfPerson(person.id)),
             )
         }
 
@@ -404,5 +462,7 @@ class HotelViewModel
             const val FOUR = 4
             const val CHRONICLE_VIEW = 6
             const val CAUSAL_VIEW = 8
+            const val PULSE_KEEP = 12
+            const val PULSE_SHOW = 2
         }
     }

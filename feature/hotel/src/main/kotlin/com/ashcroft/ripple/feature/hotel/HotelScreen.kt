@@ -63,11 +63,13 @@ fun HotelScreen(
                     onClose = viewModel::toggleWhy,
                 )
             }
-            state.selectedPerson?.let { PersonPanel(it, onWhy = viewModel::toggleWhy) }
-            if (state.selectedPerson == null) {
-                state.selectedRoom?.let { RoomInfoPanel(it) }
+            state.selectedPerson?.let {
+                PersonPanel(it, onWhy = viewModel::toggleWhy, onFollow = viewModel::toggleFollowSelected)
             }
-            TimeControls(state.timeSpeed, viewModel::setTimeSpeed)
+            if (state.selectedPerson == null) {
+                state.selectedRoom?.let { RoomInfoPanel(it, onFollow = viewModel::toggleFollowSelected) }
+            }
+            TimeControls(state.timeSpeed, viewModel::setTimeSpeed, onJump = viewModel::jumpToNextChange)
         }
     }
 }
@@ -113,6 +115,22 @@ private fun HotelHeader(state: HotelUiState) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            state.pulse.forEach { development ->
+                Text(
+                    text = "Just now: $development",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (state.following.isNotEmpty()) {
+                Text(
+                    text = "Following: ${state.following.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             state.chronicle.lastOrNull()?.let { latest ->
                 Text(
                     text = "Chronicle: $latest",
@@ -150,7 +168,7 @@ private fun FloorSelector(state: HotelUiState, onFocusFloor: (Int) -> Unit) {
 }
 
 @Composable
-private fun PersonPanel(person: PersonView, onWhy: () -> Unit) {
+private fun PersonPanel(person: PersonView, onWhy: () -> Unit, onFollow: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -197,11 +215,16 @@ private fun PersonPanel(person: PersonView, onWhy: () -> Unit) {
             person.topConflict?.let { Hint("Pulls against it: $it", top = 2) }
             NeedsRow(person.needs)
             SocialSection(person)
-            FilledTonalButton(
-                onClick = onWhy,
-                modifier = Modifier.padding(top = 10.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Why?")
+                FilledTonalButton(onClick = onWhy) {
+                    Text("Why?")
+                }
+                FilledTonalButton(onClick = onFollow) {
+                    Text(if (person.followed) "Following ✓" else "Follow")
+                }
             }
         }
     }
@@ -347,7 +370,7 @@ private fun DeveloperDetail(why: WhyView) {
 }
 
 @Composable
-private fun RoomInfoPanel(room: SelectedRoom) {
+private fun RoomInfoPanel(room: SelectedRoom, onFollow: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -375,12 +398,15 @@ private fun RoomInfoPanel(room: SelectedRoom) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            FilledTonalButton(onClick = onFollow, modifier = Modifier.padding(top = 10.dp)) {
+                Text(if (room.followed) "Following ✓" else "Follow this room")
+            }
         }
     }
 }
 
 @Composable
-private fun TimeControls(current: TimeSpeed, onSetSpeed: (TimeSpeed) -> Unit) {
+private fun TimeControls(current: TimeSpeed, onSetSpeed: (TimeSpeed) -> Unit, onJump: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -392,6 +418,9 @@ private fun TimeControls(current: TimeSpeed, onSetSpeed: (TimeSpeed) -> Unit) {
                     fontWeight = if (speed == current) FontWeight.Bold else FontWeight.Normal,
                 )
             }
+        }
+        FilledTonalButton(onClick = onJump) {
+            Text("→ next change")
         }
     }
 }
