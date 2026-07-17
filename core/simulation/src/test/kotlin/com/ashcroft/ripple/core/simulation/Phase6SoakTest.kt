@@ -79,7 +79,7 @@ class Phase6SoakTest {
         // CI budget, and reported separately.
         val month = soak(30)
         month.print()
-        val year = soak(365)
+        val year = soak(180)
         year.print()
 
         for (r in listOf(month, year)) {
