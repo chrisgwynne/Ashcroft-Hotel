@@ -23,6 +23,17 @@ enum class Department {
     MANAGEMENT,
 }
 
+/** The department a staff role most belongs to, for culture and practice; null for guests/residents. */
+fun RoleKind.department(): Department? = when (this) {
+    RoleKind.RECEPTIONIST -> Department.FRONT_DESK
+    RoleKind.CONCIERGE -> Department.CONCIERGE
+    RoleKind.HOUSEKEEPER -> Department.HOUSEKEEPING
+    RoleKind.CHEF -> Department.KITCHEN
+    RoleKind.BARTENDER -> Department.BAR
+    RoleKind.DUTY_MANAGER, RoleKind.GENERAL_MANAGER, RoleKind.OWNER -> Department.MANAGEMENT
+    RoleKind.GUEST, RoleKind.RESIDENT -> null
+}
+
 /**
  * A concrete piece of hotel work. Tasks are never random incidents — each one
  * arises from existing world state (a guest waiting, a room left dirty, an order

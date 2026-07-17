@@ -71,4 +71,6 @@ data class DecisionContext(
     val simTime: SimTime,
     /** The character of the actor's department and the hotel, as it bears on this choice (Phase 7D). */
     val culture: CultureLens = CultureLens.NONE,
+    /** The routine keys that are customary here — a candidate matching one is gently favoured (Phase 7E). */
+    val customaryPractices: Set<String> = emptySet(),
 )

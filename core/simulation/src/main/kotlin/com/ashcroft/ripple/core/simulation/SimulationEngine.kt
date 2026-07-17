@@ -64,7 +64,7 @@ class SimulationEngine(
 
     fun step(state: WorldState): WorldState {
         val now = state.clock + 1
-        val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks, state.culture)
+        val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks, state.culture, state.practices)
         val decider = DecisionMaker(world)
         val log = CauseLog(now)
         val evidence = EvidenceLog(now)
@@ -81,15 +81,21 @@ class SimulationEngine(
         val served = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log, evidence)
         // Evidence gathered this tick folds into the witnesses' observer-specific standings.
         val people = applyEvidence(served, evidence)
-        val chronicle = recordChronicle(state.people, people, state.chronicle, state.causes, now, log)
+        // Doing and watching turn into habits, and the aggregate of habits into customs.
+        val (learned, practices) = SocialLearning.apply(state.people, people, state.practices, now)
+        val chronicle = recordChronicle(state.people, learned, state.chronicle, state.causes, now, log)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, keeping the live present, everything
         // still referenced, and the most significant of the rest — so the O(n) prune
         // runs rarely and forgets churn, not history.
-        val causes = if (merged.size > GRAPH_CAP) merged.retain(GRAPH_LOW, GRAPH_RECENT, pinnedCauses(people, chronicle, tasks)) else merged
+        val causes = if (merged.size > GRAPH_CAP) {
+            merged.retain(GRAPH_LOW, GRAPH_RECENT, pinnedCauses(learned, chronicle, tasks))
+        } else {
+            merged
+        }
         return state.copy(
             clock = now,
-            people = people,
+            people = learned,
             chronicle = chronicle,
             tasks = tasks,
             causes = causes,
@@ -97,6 +103,7 @@ class SimulationEngine(
             // The same entity evidence that soured or warmed a guest also, in slow
             // aggregate, becomes the character of the departments and the hotel.
             culture = evidence.applyCulture(state.culture),
+            practices = practices,
         )
     }
 

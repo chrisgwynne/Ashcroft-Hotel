@@ -4,17 +4,17 @@ import com.ashcroft.ripple.core.decision.CultureLens
 import com.ashcroft.ripple.core.decision.TaskOffer
 import com.ashcroft.ripple.core.decision.WorldQueries
 import com.ashcroft.ripple.core.model.CultureRegistry
-import com.ashcroft.ripple.core.model.Department
 import com.ashcroft.ripple.core.model.EntityId
 import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
-import com.ashcroft.ripple.core.model.RoleKind
+import com.ashcroft.ripple.core.model.PracticeRegistry
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.RoomKind
 import com.ashcroft.ripple.core.model.WorldPos
+import com.ashcroft.ripple.core.model.department
 
 /**
  * Implements the decision engine's [WorldQueries] against the real hotel. It is
@@ -31,6 +31,7 @@ class HotelWorldQueries(
     people: List<Person>,
     private val tasks: List<HotelTask> = emptyList(),
     private val culture: CultureRegistry = CultureRegistry.EMPTY,
+    private val practices: PracticeRegistry = PracticeRegistry.EMPTY,
 ) : WorldQueries {
     private val peopleById: Map<PersonId, Person> = people.associateBy { it.id }
     private val byRoom: Map<RoomId, List<PersonId>> =
@@ -78,7 +79,7 @@ class HotelWorldQueries(
      */
     override fun cultureFor(actor: Person): CultureLens {
         val hotel = culture.of(EntityId.HOTEL)
-        val department = departmentOf(actor.role)?.let { culture.of(EntityId.department(it)) }
+        val department = actor.role.department()?.let { culture.of(EntityId.department(it)) }
         if (hotel == null && department == null) return CultureLens.NONE
         val blended = HashMap<EvidenceDimension, Double>()
 
@@ -93,15 +94,15 @@ class HotelWorldQueries(
         return CultureLens(blended)
     }
 
-    /** The department whose character an actor most belongs to, for cultural pull. */
-    private fun departmentOf(role: RoleKind): Department? = when (role) {
-        RoleKind.RECEPTIONIST -> Department.FRONT_DESK
-        RoleKind.CONCIERGE -> Department.CONCIERGE
-        RoleKind.HOUSEKEEPER -> Department.HOUSEKEEPING
-        RoleKind.CHEF -> Department.KITCHEN
-        RoleKind.BARTENDER -> Department.BAR
-        RoleKind.DUTY_MANAGER, RoleKind.GENERAL_MANAGER, RoleKind.OWNER -> Department.MANAGEMENT
-        RoleKind.GUEST, RoleKind.RESIDENT -> null
+    /**
+     * The customs the actor is part of — the established practices of their
+     * department and the hotel — so a routine that has become "how we do things
+     * here" can gently pull members toward keeping it up.
+     */
+    override fun customaryPracticesFor(actor: Person): Set<String> {
+        val hotel = practices.customary(EntityId.HOTEL)
+        val dept = actor.role.department()?.let { practices.customary(EntityId.department(it)) } ?: emptySet()
+        return hotel + dept
     }
 
     private fun taskLabel(type: com.ashcroft.ripple.core.model.HotelTaskType): String =

@@ -57,4 +57,11 @@ interface WorldQueries {
      * tests) need not supply it; the real hotel derives it from accumulated evidence.
      */
     fun cultureFor(actor: Person): CultureLens = CultureLens.NONE
+
+    /**
+     * The routine keys the actor's department and hotel currently treat as customary
+     * (Phase 7E). A candidate matching one gets a gentle pull to conform. Defaults to
+     * empty so pre-practice implementations and tests need not supply it.
+     */
+    fun customaryPracticesFor(actor: Person): Set<String> = emptySet()
 }

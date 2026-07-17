@@ -76,6 +76,8 @@ data class Person(
     val conversationLog: List<ConversationContextSignature> = emptyList(),
     /** This person's own, observer-specific reputations of everyone they know (Phase 7). */
     val standings: Standings = Standings.EMPTY,
+    /** The routines this person has learned to do, of their own accord (Phase 7E). */
+    val habits: HabitProfile = HabitProfile.EMPTY,
 ) {
     /** How often this person has recently had a like-for-like exchange with [other]. */
     fun recentExchangesWith(other: PersonId): Int = conversationLog.count { it.recipientId == other && !it.taskDriven }

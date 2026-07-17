@@ -14,6 +14,8 @@ import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.ScoreComponent
 import com.ashcroft.ripple.core.model.ScoreComponentType
 import com.ashcroft.ripple.core.model.TraitKind
+import com.ashcroft.ripple.core.model.isRoutineForming
+import com.ashcroft.ripple.core.model.routineKeyOf
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -37,6 +39,7 @@ class ActionScorer {
         personalityFit(candidate, actor, components)
         emotionalFit(candidate, actor, components)
         cultureFit(candidate, context, components)
+        learnedHabit(candidate, context, components)
         habitAndRepetition(candidate, actor, components)
         socialFactors(candidate, context, components)
         costs(candidate, context, components)
@@ -171,6 +174,25 @@ class ActionScorer {
         verb.social && warmth >= 0 -> "this is a warm place to be"
         verb.social -> "people here keep to themselves"
         else -> "it sits against how things are done here"
+    }
+
+    /**
+     * A person's own learned routines pull on them, and a routine their department
+     * or the hotel has made customary pulls a little more. Both are settled, long-arc
+     * dispositions derived from real repeated behaviour (their own, and the group's) —
+     * distinct from the short-window HABIT_STRENGTH that only notices the last few
+     * actions. A strong habit biases the familiar choice; it never forecloses a new one.
+     */
+    private fun learnedHabit(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
+        if (!candidate.verb.isRoutineForming()) return
+        val key = routineKeyOf(candidate.verb, candidate.targetRoom)
+        val own = ctx.actor.habits.strengthOf(key)
+        val customary = if (key in ctx.customaryPractices) PRACTICE_CONFORMITY else 0.0
+        val value = own * LEARNED_HABIT_WEIGHT + customary
+        if (value > 1e-6) {
+            val why = if (customary > 0.0) "it is the custom here" else "it is a settled part of their routine"
+            out += ScoreComponent(ScoreComponentType.HABIT_STRENGTH, value, why)
+        }
     }
 
     private fun socialFactors(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
@@ -320,8 +342,10 @@ class ActionScorer {
         const val TASK_WEIGHT = 0.7
         const val TASK_ON_SHIFT = 0.2
         const val TASK_GUEST_FACING = 0.1
-        const val CULTURE_WEIGHT = 0.35
-        const val CULTURE_IDLE_WEIGHT = 0.15
+        const val CULTURE_WEIGHT = 0.10
+        const val CULTURE_IDLE_WEIGHT = 0.05
+        const val LEARNED_HABIT_WEIGHT = 0.10
+        const val PRACTICE_CONFORMITY = 0.03
         const val NOISE = 0.15
     }
 }

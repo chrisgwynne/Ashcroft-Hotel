@@ -51,6 +51,7 @@ class DecisionMaker(private val world: WorldQueries) {
             availableTasks = openTasks,
             simTime = now,
             culture = world.cultureFor(actor),
+            customaryPractices = world.customaryPracticesFor(actor),
         )
 
         if (candidates.isEmpty()) {
