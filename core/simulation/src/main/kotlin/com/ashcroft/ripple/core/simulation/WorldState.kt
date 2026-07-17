@@ -7,13 +7,17 @@ import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RoomId
 import com.ashcroft.ripple.core.model.SimTime
+import kotlinx.serialization.Serializable
 
 /**
  * An immutable snapshot of the living hotel at one instant: the seeded clock,
  * every person's full state, and the accumulated [chronicle] of outcomes that
  * mattered. Everything else (occupancy, who is where) is derived, so a
- * [WorldState] is the single source of truth a tick transforms.
+ * [WorldState] is the single source of truth a tick transforms. Being fully
+ * serialisable, a snapshot can be saved, reloaded and replayed to the identical
+ * future — the deterministic engine guarantees it.
  */
+@Serializable
 data class WorldState(
     val seed: Long,
     val clock: SimTime,

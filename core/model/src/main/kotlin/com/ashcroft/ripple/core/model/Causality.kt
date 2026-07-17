@@ -110,13 +110,46 @@ data class CausalGraph(
 
     /**
      * A deterministic size bound: keep the most recent [maxNodes] and drop the
-     * edges among the rest. This is a stopgap so long runs stay in memory;
-     * significance-based retention (which never prunes a referenced cause) is the
-     * proper mechanism and refines this later.
+     * edges among the rest. Recency alone is a blunt instrument — it forgets what
+     * mattered as readily as what did not — so [retain] supersedes it for long runs.
      */
     fun prunedTo(maxNodes: Int): CausalGraph {
         if (nodes.size <= maxNodes) return this
         val keep = nodes.keys.toList().takeLast(maxNodes).toSet()
+        return CausalGraph(
+            nodes.filterKeys { it in keep },
+            edges.filter { it.parentId in keep && it.childId in keep },
+        )
+    }
+
+    /**
+     * Retain what history has shown to matter within a bounded budget:
+     *  - the most recent [recentKeep] nodes (the live present), always;
+     *  - every [pinned] node still in the graph (a cause a memory, belief, task or
+     *    chronicle entry still points at — pruning must never orphan a reference
+     *    someone still holds);
+     *  - and then, to fill the remaining [budget], the most *significant* of the
+     *    older nodes — those a real consequence reinforced.
+     * Routine churn falls away; milestones and their chains persist. Edges among
+     * dropped nodes go with them, so the result stays acyclic and reference-clean
+     * by construction. [budget] is a soft floor: pinned references are honoured even
+     * when they exceed it, so the record can never contradict itself.
+     */
+    fun retain(budget: Int, recentKeep: Int, pinned: Set<CauseId> = emptySet()): CausalGraph {
+        if (nodes.size <= budget) return this
+        val order = nodes.keys.toList()
+        val keep = LinkedHashSet<CauseId>()
+        keep += order.takeLast(recentKeep.coerceAtMost(order.size))
+        keep += pinned.filter { nodes.containsKey(it) }
+        val remaining = budget - keep.size
+        if (remaining > 0) {
+            keep += nodes.values.asSequence()
+                .filter { it.id !in keep }
+                .sortedWith(compareByDescending<CauseNode> { it.significance }.thenByDescending { it.simTime.epochMinutes })
+                .take(remaining)
+                .map { it.id }
+        }
+        if (keep.size >= nodes.size) return this
         return CausalGraph(
             nodes.filterKeys { it in keep },
             edges.filter { it.parentId in keep && it.childId in keep },

@@ -70,10 +70,27 @@ class SimulationEngine(
         val people = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log)
         val chronicle = recordChronicle(state.people, people, state.chronicle, state.causes, now, log)
         val merged = log.foldInto(state.causes)
-        // Prune only when the cap is exceeded, back to a lower watermark, so the O(n)
-        // prune runs rarely rather than every tick.
-        val causes = if (merged.size > GRAPH_CAP) merged.prunedTo(GRAPH_LOW) else merged
+        // Prune only when the cap is exceeded, keeping the live present, everything
+        // still referenced, and the most significant of the rest — so the O(n) prune
+        // runs rarely and forgets churn, not history.
+        val causes = if (merged.size > GRAPH_CAP) merged.retain(GRAPH_LOW, GRAPH_RECENT, pinnedCauses(people, chronicle, tasks)) else merged
         return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks, causes = causes)
+    }
+
+    /**
+     * Every cause a still-living part of the world points at: a memory or belief's
+     * provenance, a task's origin, a chronicle milestone's chain. The pruner must
+     * keep all of these so nothing anyone still holds is left dangling.
+     */
+    private fun pinnedCauses(people: List<Person>, chronicle: List<ChronicleEntry>, tasks: List<HotelTask>): Set<CauseId> {
+        val pinned = HashSet<CauseId>()
+        for (person in people) {
+            person.memories.forEach { m -> m.causeId?.let { pinned.add(it) } }
+            person.knowledge.all.forEach { b -> b.causeId?.let { pinned.add(it) } }
+        }
+        chronicle.forEach { pinned.addAll(it.causeIds) }
+        tasks.forEach { pinned.addAll(it.causeIds) }
+        return pinned
     }
 
     /**
@@ -670,6 +687,7 @@ class SimulationEngine(
         const val REL_MATERIAL = 0.03
         const val GRAPH_CAP = 6_000
         const val GRAPH_LOW = 4_000
+        const val GRAPH_RECENT = 3_000
         const val CHRONICLE_REINFORCE = 0.2
         const val CHRONICLE_CAUSE_LIMIT = 6
         val CHRONICLE_SOURCE_TYPES = setOf(

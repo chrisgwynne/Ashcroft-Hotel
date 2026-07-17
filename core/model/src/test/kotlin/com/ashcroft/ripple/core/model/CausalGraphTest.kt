@@ -44,6 +44,36 @@ class CausalGraphTest {
     }
 
     @Test
+    fun retainKeepsSignificanceRecencyAndReferencesAndDropsChurn() {
+        // Ten nodes of rising significance; a very old but very significant one, and
+        // an old pinned one, must survive a tight budget while middling churn is dropped.
+        var g = CausalGraph()
+        for (i in 0 until 10) {
+            g = g.add(
+                CauseNode(CauseId("n$i"), SimTime(i.toLong()), CauseType.DECISION, summaryKey = "x", significance = i * 0.1),
+            )
+        }
+        val kept = g.retain(budget = 5, recentKeep = 2, pinned = setOf(CauseId("n0")))
+        assertTrue("stays within a sensible bound", kept.size <= 6)
+        assertTrue("the two most recent are kept", kept.node(CauseId("n9")) != null && kept.node(CauseId("n8")) != null)
+        assertTrue("the pinned reference survives however old", kept.node(CauseId("n0")) != null)
+        assertTrue("a low-significance middling node is dropped", kept.node(CauseId("n3")) == null)
+        assertTrue("the result stays acyclic and reference-clean", kept.isAcyclic() && kept.referencesResolve())
+    }
+
+    @Test
+    fun retainNeverOrphansAPinnedReferenceEvenBeyondBudget() {
+        var g = CausalGraph()
+        for (i in 0 until 10) {
+            g = g.add(CauseNode(CauseId("n$i"), SimTime(i.toLong()), CauseType.DECISION, summaryKey = "x", significance = 0.1))
+        }
+        val pinned = (0 until 8).map { CauseId("n$it") }.toSet()
+        val kept = g.retain(budget = 3, recentKeep = 1, pinned = pinned)
+        assertTrue("every pinned reference is honoured even past budget", pinned.all { kept.node(it) != null })
+        assertTrue("references still resolve", kept.referencesResolve())
+    }
+
+    @Test
     fun aCycleWouldBeDetected() {
         // Hand-craft a cyclic edge set (the builder never produces one) and confirm detection.
         val cyclic = CausalGraph(
