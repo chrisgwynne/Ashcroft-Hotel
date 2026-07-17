@@ -21,6 +21,7 @@ import com.ashcroft.ripple.core.model.EntityId
 import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.FactTopic
 import com.ashcroft.ripple.core.model.GoalTarget
+import com.ashcroft.ripple.core.model.GuestStay
 import com.ashcroft.ripple.core.model.GuestValue
 import com.ashcroft.ripple.core.model.HotelLayout
 import com.ashcroft.ripple.core.model.HotelTask
@@ -32,10 +33,13 @@ import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
 import com.ashcroft.ripple.core.model.NeedKind
+import com.ashcroft.ripple.core.model.PerceptionDimension
+import com.ashcroft.ripple.core.model.PerceptionWeights
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.ProfessionalDimension
 import com.ashcroft.ripple.core.model.RelationDimension
+import com.ashcroft.ripple.core.model.ReturnStage
 import com.ashcroft.ripple.core.model.SimTime
 import com.ashcroft.ripple.core.model.StandingDimension
 import com.ashcroft.ripple.core.model.Tendencies
@@ -185,7 +189,11 @@ class SimulationEngine(
             evidence.entity(EntityId.HOTEL, EvidenceDimension.RELIABILITY, BAD, drop * 3, requesterId, setOf(overdue))
             evidence.entity(EntityId.department(task.department), EvidenceDimension.RELIABILITY, BAD, drop * 4, requesterId, setOf(overdue))
             byId[requesterId] = requester.copy(
-                stay = stay.copy(satisfaction = (stay.satisfaction - drop).coerceAtLeast(0.0)),
+                // Neglect bears only on speed and reliability — it does not rewrite the whole opinion.
+                stay = stay.witnessing(
+                    Triple(PerceptionDimension.SPEED, BAD, PERCEPTION_UNIT),
+                    Triple(PerceptionDimension.RELIABILITY, BAD, PERCEPTION_UNIT * 0.8),
+                ),
                 emotions = requester.emotions.stirred(mapOf(EmotionKind.FRUSTRATION to drop * 2)),
             )
         }
@@ -350,7 +358,7 @@ class SimulationEngine(
             actors = setOf(requesterId),
             parents = listOf(service to CauseRelation.CAUSED),
         )
-        val bump = if (requester.stay?.expectations?.contains(GuestValue.SPEED) == true) 0.08 else 0.05
+        // Attentive service is evidence on the axes it bears on — never a blanket bump.
         byId[requesterId] = stampLastMemory(
             requester.copy(
                 memories = remember(requester, MemoryKind.WAS_HELPED, serverId, valence = 0.5, importance = 0.4, now = now),
@@ -359,7 +367,12 @@ class SimulationEngine(
                     mapOf(RelationDimension.GRATITUDE to 0.08, RelationDimension.FAMILIARITY to 0.05),
                 ),
                 acquaintances = requester.acquaintances + serverId,
-                stay = requester.stay?.let { it.copy(satisfaction = (it.satisfaction + bump).coerceAtMost(1.0)) },
+                stay = requester.stay?.witnessing(
+                    Triple(PerceptionDimension.SPEED, GOOD, PERCEPTION_UNIT),
+                    Triple(PerceptionDimension.WELCOME, GOOD, PERCEPTION_UNIT * 0.6),
+                    Triple(PerceptionDimension.STAFF_WARMTH, GOOD, PERCEPTION_UNIT * 0.8),
+                    Triple(PerceptionDimension.RELIABILITY, GOOD, PERCEPTION_UNIT * 0.6),
+                ),
             ),
             memCause,
         )
@@ -368,6 +381,42 @@ class SimulationEngine(
             memories = remember(server, MemoryKind.HELPED_SOMEONE, requesterId, 0.4, 0.3, now),
             relationships = server.relationships.adjust(requesterId, mapOf(RelationDimension.FAMILIARITY to 0.05)),
             acquaintances = server.acquaintances + requesterId,
+        )
+    }
+
+    /** Fold one or more perception observations into a guest's stay. */
+    private fun GuestStay.witnessing(vararg updates: Triple<PerceptionDimension, Double, Double>): GuestStay {
+        var picture = perception
+        for ((dimension, direction, weight) in updates) picture = picture.witness(dimension, direction, weight)
+        return copy(perception = picture)
+    }
+
+    /**
+     * Re-read a guest's satisfaction from the multi-dimensional picture they have
+     * formed, weighted by what they care about, and let their wish to return drift
+     * toward how the stay is going and their warmth to the staff. Intention only
+     * ever grows into an *option* — never a guaranteed booking.
+     */
+    private fun refreshGuestOutlook(stay: GuestStay, person: Person, everyone: List<Person>): GuestStay {
+        val weights = PerceptionWeights.forGuest(stay.purpose, stay.expectations, person.personality)
+        val satisfaction = stay.perception.satisfaction(weights)
+        val staff = everyone.filter { it.role.isStaff }.map { it.id }.toSet()
+        val warmth = person.relationships.all.filter { it.other in staff }.maxOfOrNull { it.warmth() } ?: 0.0
+        val target = (satisfaction * 0.7 + warmth.coerceIn(0.0, 1.0) * 0.3).coerceIn(0.0, 1.0)
+        val value = stay.returnIntention.value + (target - stay.returnIntention.value) * RETURN_DRIFT
+        val implied = when {
+            value >= RETURN_PLANNING -> ReturnStage.PLANNING
+            value >= RETURN_INTENDING -> ReturnStage.INTENDING
+            else -> ReturnStage.NONE
+        }
+        val stage = if (implied.ordinal > stay.returnIntention.stage.ordinal) implied else stay.returnIntention.stage
+        return stay.copy(
+            satisfaction = satisfaction,
+            returnIntention = stay.returnIntention.copy(
+                value = value,
+                confidence = (stay.returnIntention.confidence + RETURN_CONFIDENCE_STEP).coerceAtMost(1.0),
+                stage = stage,
+            ),
         )
     }
 
@@ -430,11 +479,9 @@ class SimulationEngine(
             needs = NeedDynamics.tick(person.needs, effective),
             knowledge = knowledge,
             emotions = EmotionDynamics.tick(person),
-            // Satisfaction ebbs toward a modest baseline between attentions, so a
-            // well-served guest stays content and a neglected one quietly sours.
-            stay = person.stay?.let {
-                it.copy(satisfaction = it.satisfaction + (SATISFACTION_BASELINE - it.satisfaction) * SATISFACTION_DRIFT)
-            },
+            // Satisfaction is a weighted read of the multi-dimensional picture the guest
+            // has formed; return intention drifts toward that picture and their bonds.
+            stay = person.stay?.let { refreshGuestOutlook(it, person, everyone) },
         )
         val withNeeds = applyRecall(perceived, everyone, now, log)
 
@@ -792,8 +839,11 @@ class SimulationEngine(
         const val URGENT_FLOOR = 0.12f
         const val MAX_MEMORIES = 40
         const val HANDOVER_FIDELITY = 0.9
-        const val SATISFACTION_BASELINE = 0.45
-        const val SATISFACTION_DRIFT = 0.0004
+        const val PERCEPTION_UNIT = 1.0
+        const val RETURN_DRIFT = 0.003
+        const val RETURN_CONFIDENCE_STEP = 0.001
+        const val RETURN_INTENDING = 0.5
+        const val RETURN_PLANNING = 0.75
         const val OVERDUE_SATISFACTION = 0.03
         const val OVERDUE_SATISFACTION_SPEED = 0.05
         const val DECISION_SIGNIFICANCE = 0.3
