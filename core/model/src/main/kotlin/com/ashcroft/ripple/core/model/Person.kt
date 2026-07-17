@@ -78,6 +78,8 @@ data class Person(
     val standings: Standings = Standings.EMPTY,
     /** The routines this person has learned to do, of their own accord (Phase 7E). */
     val habits: HabitProfile = HabitProfile.EMPTY,
+    /** A staff member's emergent long-run professional aspiration, if any (Phase 7F). */
+    val aspiration: Aspiration? = null,
 ) {
     /** How often this person has recently had a like-for-like exchange with [other]. */
     fun recentExchangesWith(other: PersonId): Int = conversationLog.count { it.recipientId == other && !it.taskDriven }

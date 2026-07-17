@@ -12,10 +12,12 @@ value class CauseId(val value: String)
 value class GoalId(val value: String)
 
 /**
- * The kinds of desired future state a person can hold in Phase 3. These are
- * ordinary hotel-life goals — deliberately no marriage, promotion, crime or
- * other dramatic arcs. Goals arise from current state; they are never assigned
- * because the engine wants a plot.
+ * The kinds of desired future state a person can hold. These are ordinary
+ * hotel-life goals — deliberately no marriage, crime or other dramatic arcs.
+ * Goals arise from current state; they are never assigned because the engine
+ * wants a plot. [ADVANCE_CAREER] (Phase 7F) is a long-arc *aspiration*, not a
+ * scripted promotion: it biases an ambitious, accomplished person toward growth,
+ * but nothing about it ever changes their role by fiat.
  */
 @Serializable
 enum class GoalType {
@@ -28,6 +30,7 @@ enum class GoalType {
     IMPROVE_COMPETENCE,
     SAVE_RESOURCES,
     COMPLETE_STAY,
+    ADVANCE_CAREER,
 }
 
 /** What a goal is oriented toward. */

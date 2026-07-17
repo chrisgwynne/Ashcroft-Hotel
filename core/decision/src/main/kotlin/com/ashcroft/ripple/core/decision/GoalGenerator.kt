@@ -40,6 +40,11 @@ class GoalGenerator {
         if (actor.role.isStaff) {
             val ambition = actor.personality[TraitKind.AMBITION]
             goals += goal(actor, now, GoalType.GAIN_APPROVAL, GoalTarget.None, priority = (0.2f + ambition * 0.4f).toDouble())
+            // A settled, ambitious professional carries a quiet aspiration to grow — a
+            // long-arc goal derived from who they have become, never a scripted promotion.
+            actor.aspiration?.takeIf { it.isPursuing }?.let { aspiration ->
+                goals += goal(actor, now, GoalType.ADVANCE_CAREER, GoalTarget.None, priority = (0.2 + aspiration.drive * 0.5))
+            }
         } else {
             goals += goal(actor, now, GoalType.COMPLETE_STAY, GoalTarget.None, priority = 0.35)
         }

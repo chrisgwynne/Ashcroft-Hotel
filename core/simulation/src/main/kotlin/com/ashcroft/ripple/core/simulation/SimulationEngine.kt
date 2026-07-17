@@ -82,7 +82,9 @@ class SimulationEngine(
         // Evidence gathered this tick folds into the witnesses' observer-specific standings.
         val people = applyEvidence(served, evidence)
         // Doing and watching turn into habits, and the aggregate of habits into customs.
-        val (learned, practices) = SocialLearning.apply(state.people, people, state.practices, now)
+        val (habituated, practices) = SocialLearning.apply(state.people, people, state.practices, now)
+        // Careers grow from that record; leaders recognise whom they believe has earned it.
+        val learned = Careers.apply(habituated, now)
         val chronicle = recordChronicle(state.people, learned, state.chronicle, state.causes, now, log)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, keeping the live present, everything

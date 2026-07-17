@@ -40,6 +40,7 @@ class ActionScorer {
         emotionalFit(candidate, actor, components)
         cultureFit(candidate, context, components)
         learnedHabit(candidate, context, components)
+        opportunityFromHistory(candidate, actor, components)
         habitAndRepetition(candidate, actor, components)
         socialFactors(candidate, context, components)
         costs(candidate, context, components)
@@ -100,6 +101,8 @@ class ActionScorer {
                     reliefNeeds(candidate.verb).contains((goal.target as GoalTarget.Need).kind) -> goal.priority * 0.4
                 goal.type == GoalType.FULFIL_WORK && candidate.verb == ActionVerb.WORK -> goal.priority * 0.5
                 goal.type == GoalType.GAIN_APPROVAL && (candidate.verb == ActionVerb.WORK || candidate.verb.social) -> goal.priority * 0.2
+                goal.type == GoalType.ADVANCE_CAREER && (candidate.verb == ActionVerb.WORK || candidate.verb == ActionVerb.ATTEND) ->
+                    goal.priority * 0.2
                 else -> 0.0
             }
         }
@@ -192,6 +195,28 @@ class ActionScorer {
         if (value > 1e-6) {
             val why = if (customary > 0.0) "it is the custom here" else "it is a settled part of their routine"
             out += ScoreComponent(ScoreComponentType.HABIT_STRENGTH, value, why)
+        }
+    }
+
+    /**
+     * How a person's own history reweights the opportunities in front of them. A
+     * proven, driven professional finds real work a slightly better bet — it is a
+     * chance to build on a record they already hold — while someone with no such
+     * record, or a recent run of things not working out, feels no such pull. History
+     * thus quietly opens some doors wider than others, without ever forcing one.
+     */
+    private fun opportunityFromHistory(
+        candidate: ActionCandidate,
+        actor: com.ashcroft.ripple.core.model.Person,
+        out: MutableList<ScoreComponent>,
+    ) {
+        val aspiration = actor.aspiration ?: return
+        if (candidate.verb != ActionVerb.ATTEND && candidate.verb != ActionVerb.WORK) return
+        val setbacks = actor.behaviour.repeatedFailures.values.sum()
+        val record = (aspiration.demonstrated - setbacks * SETBACK_STEP).coerceIn(0.0, 1.0)
+        val value = aspiration.drive * record * OPPORTUNITY_WEIGHT
+        if (value > 1e-6) {
+            out += ScoreComponent(ScoreComponentType.FUTURE_OPPORTUNITY_VALUE, value, "it is a chance to build on their record")
         }
     }
 
@@ -346,6 +371,8 @@ class ActionScorer {
         const val CULTURE_IDLE_WEIGHT = 0.05
         const val LEARNED_HABIT_WEIGHT = 0.10
         const val PRACTICE_CONFORMITY = 0.03
+        const val OPPORTUNITY_WEIGHT = 0.08
+        const val SETBACK_STEP = 0.1
         const val NOISE = 0.15
     }
 }

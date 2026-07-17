@@ -29,8 +29,20 @@ class ActionCandidateProvider(private val world: WorldQueries) {
             out += KnownOpportunity(ActionVerb.WASH, home, "freshen up in ${world.roomName(home)}")
             out += KnownOpportunity(ActionVerb.RETURN_HOME, home, "retreat to ${world.roomName(home)}")
         }
+        // History opens (and closes) doors: a proven, driven professional takes it on
+        // themselves to bring others along — an opportunity that only exists because of
+        // what they have made of themselves, and that a recent run of failures withdraws.
+        val aspiration = actor.aspiration
+        if (actor.role.isStaff && aspiration != null && aspiration.isPursuing && aspiration.isProven && !underACloud(actor)) {
+            world.firstRoomOfKind(RoomKind.STAFF_ROOM)?.let { room ->
+                out += KnownOpportunity(ActionVerb.SOCIALISE, room, "share the ropes with the team")
+            }
+        }
         return out
     }
+
+    /** A recent run of things not working out costs someone the standing to take initiative. */
+    private fun underACloud(actor: Person): Boolean = actor.behaviour.repeatedFailures.values.sum() >= FAILURE_CLOUD
 
     fun candidates(
         actor: Person,
@@ -70,6 +82,10 @@ class ActionCandidateProvider(private val world: WorldQueries) {
         offer(ActionVerb.TAKE_BREAK, currentRoom, null)
         offer(ActionVerb.WAIT, currentRoom, null)
         return out.values.toList()
+    }
+
+    private companion object {
+        const val FAILURE_CLOUD = 4
     }
 
     private fun durationForTask(task: TaskOffer): Int = when (task.department) {
