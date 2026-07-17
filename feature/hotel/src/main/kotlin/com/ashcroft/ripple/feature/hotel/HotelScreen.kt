@@ -230,6 +230,7 @@ private fun WhyPanel(
                 "What they might have done instead",
                 why.alternatives.map { "${it.label} — ${it.whyLower}" },
             )
+            BulletSection("The deeper why — what led here", why.causalStory)
             if (developerMode) DeveloperDetail(why)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -261,6 +262,7 @@ private fun SocialSection(person: PersonView) {
         BulletSection("· dev · beliefs vs truth", person.developerBeliefs)
         BulletSection("· dev · rumours held", person.developerRumours)
         BulletSection("· dev · false beliefs", person.developerFalseBeliefs)
+        BulletSection("· dev · their history", person.developerHistory)
     }
 }
 

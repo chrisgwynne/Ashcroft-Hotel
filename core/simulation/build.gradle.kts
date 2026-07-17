@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":core:world"))
     implementation(project(":core:decision"))
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
 }

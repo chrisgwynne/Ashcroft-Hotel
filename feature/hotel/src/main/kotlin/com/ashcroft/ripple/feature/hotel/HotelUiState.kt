@@ -57,6 +57,8 @@ data class PersonView(
     val developerBeliefs: List<String>,
     val developerRumours: List<String>,
     val developerFalseBeliefs: List<String>,
+    // Developer mode only: this person's causal history, newest first (Phase 6).
+    val developerHistory: List<String> = emptyList(),
 )
 
 /** A plausible alternative the person weighed, and why it lost. */
@@ -71,6 +73,8 @@ data class WhyView(
     val alternatives: List<AlternativeView>,
     val developerLines: List<String>,
     val stochastic: String,
+    // Phase 6 — the deeper why, traced through the causal graph (immediate → because → rooted in).
+    val causalStory: List<String> = emptyList(),
 )
 
 data class HotelUiState(

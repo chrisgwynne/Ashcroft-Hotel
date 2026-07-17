@@ -189,6 +189,7 @@ class HotelViewModel
                 developerBeliefs = if (developerMode) Inspectors.beliefs(world, person.id) else emptyList(),
                 developerRumours = if (developerMode) Inspectors.rumours(world, person.id) else emptyList(),
                 developerFalseBeliefs = if (developerMode) Inspectors.falseBeliefs(world, person.id) else emptyList(),
+                developerHistory = if (developerMode) Inspectors.causalHistory(world, person.id).take(CAUSAL_VIEW) else emptyList(),
             )
         }
 
@@ -274,6 +275,7 @@ class HotelViewModel
                 alternatives = explanation.alternatives.map { AlternativeView(it.label, it.whyLower) },
                 developerLines = chosen?.components?.map { "${it.type}: ${format(it.value)}" } ?: emptyList(),
                 stochastic = chosen?.let { "noise ${format(it.stochasticAdjustment)} · total ${format(it.finalScore)}" } ?: "",
+                causalStory = Inspectors.why(world, record.actorId),
             )
         }
 
@@ -386,5 +388,6 @@ class HotelViewModel
             const val THREE = 3
             const val FOUR = 4
             const val CHRONICLE_VIEW = 6
+            const val CAUSAL_VIEW = 8
         }
     }

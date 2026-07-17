@@ -6,9 +6,11 @@ import com.ashcroft.ripple.core.model.ActionState
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.ActivityKind
 import com.ashcroft.ripple.core.model.Belief
+import com.ashcroft.ripple.core.model.CausalGraph
 import com.ashcroft.ripple.core.model.CauseId
 import com.ashcroft.ripple.core.model.CauseRelation
 import com.ashcroft.ripple.core.model.CauseType
+import com.ashcroft.ripple.core.model.ChronicleEntry
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.ConversationReception
 import com.ashcroft.ripple.core.model.DeterministicRandom
@@ -66,7 +68,7 @@ class SimulationEngine(
         val generated = HotelOperations.generate(layout, peopleResolved, resolvedTasks, now)
         val tasks = recordNewTasks(state.tasks, generated, log)
         val people = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log)
-        val chronicle = Chronicler.update(state.people, people, state.chronicle, now)
+        val chronicle = recordChronicle(state.people, people, state.chronicle, state.causes, now, log)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, back to a lower watermark, so the O(n)
         // prune runs rarely rather than every tick.
@@ -190,6 +192,52 @@ class SimulationEngine(
             }
         }
         return open.values.toList()
+    }
+
+    /**
+     * Let the chronicler notice its rare milestones, then anchor each new line to
+     * the real interactions that produced it: the entry carries the contributing
+     * cause ids, a CHRONICLE_SIGNIFICANCE node ties them together, and each
+     * contributing cause is reinforced — a bond written into the chronicle is proof
+     * that the exchanges which built it truly mattered. The chronicler stays pure;
+     * all causal wiring lives here, where the graph is.
+     */
+    private fun recordChronicle(
+        before: List<Person>,
+        current: List<Person>,
+        previous: List<ChronicleEntry>,
+        graph: CausalGraph,
+        now: SimTime,
+        log: CauseLog,
+    ): List<ChronicleEntry> {
+        val updated = Chronicler.update(before, current, previous, now)
+        if (updated.size == previous.size) return updated
+        val result = previous.toMutableList()
+        for (entry in updated.drop(previous.size)) {
+            val causes = relevantCauses(graph, entry.involved)
+            val marker = log.emit(
+                CauseType.CHRONICLE_SIGNIFICANCE,
+                summaryKey = "chronicle.recorded",
+                significance = entry.significance,
+                actors = entry.involved,
+                metadata = mapOf("headline" to entry.headline),
+                parents = causes.map { it to CauseRelation.REVEALED },
+            )
+            causes.forEach { log.reinforce(it, CHRONICLE_REINFORCE) }
+            result += entry.copy(causeIds = (causes + marker).toSet())
+        }
+        return result
+    }
+
+    /** The recent, most significant interactions in the graph that concern the people in a milestone. */
+    private fun relevantCauses(graph: CausalGraph, involved: Set<PersonId>): List<CauseId> {
+        val subjectKeys = involved.map { "person:${it.value}" }.toSet()
+        return graph.nodes.values
+            .filter { it.type in CHRONICLE_SOURCE_TYPES }
+            .filter { node -> node.actorIds.any { it in involved } || node.subjectIds.any { it in subjectKeys } }
+            .sortedByDescending { it.simTime.epochMinutes }
+            .take(CHRONICLE_CAUSE_LIMIT)
+            .map { it.id }
     }
 
     /** A guest-facing task finished with the guest present: record the service and its consequences. */
@@ -622,6 +670,14 @@ class SimulationEngine(
         const val REL_MATERIAL = 0.03
         const val GRAPH_CAP = 6_000
         const val GRAPH_LOW = 4_000
+        const val CHRONICLE_REINFORCE = 0.2
+        const val CHRONICLE_CAUSE_LIMIT = 6
+        val CHRONICLE_SOURCE_TYPES = setOf(
+            CauseType.RELATIONSHIP_CHANGE,
+            CauseType.CONVERSATION_ACT,
+            CauseType.SERVICE_INTERACTION,
+            CauseType.MEMORY_CREATED,
+        )
 
         // A rebuffed overture leaves a small sting — a little resentment, and a face now known.
         val REBUFFED = mapOf(

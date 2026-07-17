@@ -107,6 +107,29 @@ class Phase6CausalTest {
     }
 
     @Test
+    fun chronicleEntriesCarryRealCauseChains() {
+        // A chronicle line is a milestone; anchor each to the real interactions that
+        // produced it, captured as it is written (before the pruner can thin them).
+        var state = AshcroftScenario.initial()
+        var checked = 0
+        repeat(10 * 24 * 60) {
+            val before = state.chronicle.size
+            state = engine.step(state)
+            if (state.chronicle.size > before) {
+                val entry = state.chronicle.last()
+                assertTrue("a milestone should record what led to it", entry.causeIds.isNotEmpty())
+                assertTrue("and those causes should be real nodes", entry.causeIds.all { state.causes.node(it) != null })
+                assertTrue(
+                    "one of them should be the chronicle marker tying the rest together",
+                    entry.causeIds.any { state.causes.node(it)?.type == CauseType.CHRONICLE_SIGNIFICANCE },
+                )
+                checked++
+            }
+        }
+        assertTrue("ordinary life should produce at least one chronicled milestone in ten days", checked > 0)
+    }
+
+    @Test
     fun consequencesRaiseSignificanceRetrospectively() {
         // A cause with no consequence keeps its base significance; the same kind of
         // cause that later sours a guest is reinforced above it, and the echo reaches
