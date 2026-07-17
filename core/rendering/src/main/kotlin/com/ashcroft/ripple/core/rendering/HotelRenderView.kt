@@ -37,6 +37,12 @@ class HotelRenderView
         /** Invoked when a room is tapped (or null when empty space is tapped). */
         var onRoomSelected: ((RoomId?) -> Unit)? = null
 
+        /** Invoked when a person is tapped. */
+        var onPersonSelected: ((String?) -> Unit)? = null
+
+        private var people: List<PersonMarker> = emptyList()
+        private var selectedPerson: String? = null
+
         var camera: Camera = Camera()
             private set
 
@@ -59,6 +65,26 @@ class HotelRenderView
                 color = 0xFFD9B25A.toInt()
                 strokeWidth = 4f
             }
+        private val personFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xFFEADFC4.toInt()
+        }
+        private val personRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = 0xFF2B211A.toInt()
+            strokeWidth = 2f
+        }
+        private val personSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = 0xFFD9B25A.toInt()
+            strokeWidth = 3.5f
+        }
+        private val personLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF2B211A.toInt()
+            textSize = 16f
+            textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
+        }
 
         fun setScene(newScene: HotelScene) {
             scene = newScene
@@ -73,6 +99,16 @@ class HotelRenderView
 
         fun setSelectedRoom(id: RoomId?) {
             selectedRoom = id
+            invalidate()
+        }
+
+        fun setPeople(markers: List<PersonMarker>) {
+            people = markers
+            invalidate()
+        }
+
+        fun setSelectedPerson(id: String?) {
+            selectedPerson = id
             invalidate()
         }
 
@@ -104,9 +140,18 @@ class HotelRenderView
                     }
 
                     override fun onSingleTapUp(e: MotionEvent): Boolean {
-                        val hit = hitTester.roomAt(Vec2(e.x, e.y), camera, scene.onLevel(focusedLevel), focusedLevel)
-                        selectedRoom = hit
-                        onRoomSelected?.invoke(hit)
+                        val tap = Vec2(e.x, e.y)
+                        val person = hitTester.personAt(tap, camera, people, focusedLevel)
+                        if (person != null) {
+                            selectedPerson = person
+                            onPersonSelected?.invoke(person)
+                        } else {
+                            val hit = hitTester.roomAt(tap, camera, scene.onLevel(focusedLevel), focusedLevel)
+                            selectedRoom = hit
+                            selectedPerson = null
+                            onRoomSelected?.invoke(hit)
+                            onPersonSelected?.invoke(null)
+                        }
                         invalidate()
                         return true
                     }
@@ -130,6 +175,21 @@ class HotelRenderView
             val rooms = scene.onLevel(focusedLevel)
             for (room in rooms) {
                 drawRoom(canvas, room)
+            }
+            drawPeople(canvas)
+        }
+
+        private fun drawPeople(canvas: Canvas) {
+            for (marker in people) {
+                if (marker.level != focusedLevel) continue
+                val centre = worldScreen(marker.col + 0.5f, marker.row + 0.5f, marker.level)
+                val radius = 9f
+                canvas.drawCircle(centre.x, centre.y, radius, personFillPaint)
+                canvas.drawCircle(centre.x, centre.y, radius, personRingPaint)
+                if (marker.id == selectedPerson) {
+                    canvas.drawCircle(centre.x, centre.y, radius + 4f, personSelectedPaint)
+                }
+                canvas.drawText(marker.label, centre.x, centre.y + 5f, personLabelPaint)
             }
         }
 

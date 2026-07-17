@@ -18,5 +18,6 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    api(libs.kotlinx.collections.immutable)
     testImplementation(libs.junit)
 }

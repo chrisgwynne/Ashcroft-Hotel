@@ -1,6 +1,7 @@
 package com.ashcroft.ripple.feature.hotel
 
 import com.ashcroft.ripple.core.model.RoomId
+import com.ashcroft.ripple.core.rendering.PersonMarker
 
 /** The set of playback speeds offered by the observer time controls. */
 enum class TimeSpeed(
@@ -20,14 +21,71 @@ data class SelectedRoom(
     val name: String,
     val kindLabel: String,
     val floorLabel: String,
-    val sizeLabel: String,
+    val occupants: List<String>,
+    /** Whether the player is currently following this room (Phase 8). */
+    val followed: Boolean = false,
 )
 
+data class NeedReadout(val label: String, val note: String, val level: Float)
+
 /**
- * Everything the hotel screen needs to render its chrome. The isometric scene
- * geometry is static in Phase 1 and supplied separately by the view model;
- * this state carries the observable, changing pieces.
+ * A readable, observation-level view of a selected person: what they are doing,
+ * why, and how they feel — never a raw stat dump.
  */
+data class PersonView(
+    val id: String,
+    val name: String,
+    val ageAndRole: String,
+    val mood: String,
+    val currentAction: String,
+    val actionPhase: String,
+    val destination: String?,
+    val currentGoal: String?,
+    val reasonSummary: String,
+    val topSupport: String?,
+    val topConflict: String?,
+    val needs: List<NeedReadout>,
+    // Phase 4 — the inner social life, shown as observation, never raw numbers.
+    val feeling: String?,
+    val duty: String?,
+    val satisfaction: String?,
+    val tendencies: List<String>,
+    val relationships: List<String>,
+    val knows: List<String>,
+    val recentMemories: List<String>,
+    val recalledMemory: String?,
+    val lastConversation: String?,
+    // Developer mode only: the hidden machinery (beliefs vs truth, rumours, false beliefs).
+    val developerBeliefs: List<String>,
+    val developerRumours: List<String>,
+    val developerFalseBeliefs: List<String>,
+    // Developer mode only: this person's causal history, newest first (Phase 6).
+    val developerHistory: List<String> = emptyList(),
+    // Phase 7G — who this person is becoming: their settled routines and aspiration (read-only).
+    val identity: List<String> = emptyList(),
+    // Developer mode only: their career aspiration and the "Why?" read three ways.
+    val developerAspiration: List<String> = emptyList(),
+    val developerWhyThreeWays: List<String> = emptyList(),
+    /** Whether the player is currently following this person (Phase 8). */
+    val followed: Boolean = false,
+)
+
+/** A plausible alternative the person weighed, and why it lost. */
+data class AlternativeView(val label: String, val whyLower: String)
+
+/** The full "Why?" account for the selected person's current action. */
+data class WhyView(
+    val headline: String,
+    val summary: String,
+    val positives: List<String>,
+    val negatives: List<String>,
+    val alternatives: List<AlternativeView>,
+    val developerLines: List<String>,
+    val stochastic: String,
+    // Phase 6 — the deeper why, traced through the causal graph (immediate → because → rooted in).
+    val causalStory: List<String> = emptyList(),
+)
+
 data class HotelUiState(
     val hotelName: String,
     val establishedYear: Int,
@@ -37,10 +95,20 @@ data class HotelUiState(
     val focusedLevel: Int,
     val floors: List<FloorOption>,
     val timeSpeed: TimeSpeed,
+    val people: List<PersonMarker>,
     val selectedRoom: SelectedRoom?,
+    val selectedPerson: PersonView?,
+    val whyOpen: Boolean,
+    val developerMode: Boolean,
+    val why: WhyView?,
+    val chronicle: List<String>,
+    val openTaskCount: Int,
+    // Phase 7G — the hotel's and departments' emergent identity, read-only (developer mode).
+    val developerHotelIdentity: List<String> = emptyList(),
+    val developerDepartments: List<String> = emptyList(),
+    // Phase 8 — the hotel's "pulse" (recent meaningful developments) and what the player follows.
+    val pulse: List<String> = emptyList(),
+    val following: List<String> = emptyList(),
 )
 
-data class FloorOption(
-    val level: Int,
-    val label: String,
-)
+data class FloorOption(val level: Int, val label: String)

@@ -4,8 +4,11 @@ import android.content.Context
 import androidx.room.Room
 import com.ashcroft.ripple.core.database.RippleDatabase
 import com.ashcroft.ripple.core.database.dao.SavedGameDao
+import com.ashcroft.ripple.core.database.dao.WorldSnapshotDao
 import com.ashcroft.ripple.core.database.save.RoomSaveRepository
+import com.ashcroft.ripple.core.database.save.RoomSnapshotRepository
 import com.ashcroft.ripple.core.database.save.SaveRepository
+import com.ashcroft.ripple.core.database.save.SnapshotRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -29,6 +32,9 @@ object DatabaseModule {
 
     @Provides
     fun provideSavedGameDao(database: RippleDatabase): SavedGameDao = database.savedGameDao()
+
+    @Provides
+    fun provideWorldSnapshotDao(database: RippleDatabase): WorldSnapshotDao = database.worldSnapshotDao()
 }
 
 @Module
@@ -37,4 +43,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindSaveRepository(impl: RoomSaveRepository): SaveRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSnapshotRepository(impl: RoomSnapshotRepository): SnapshotRepository
 }

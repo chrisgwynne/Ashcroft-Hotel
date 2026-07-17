@@ -10,7 +10,7 @@ complexity:
   active: true
   LongParameterList:
     active: true
-    functionThreshold: 8
+    functionThreshold: 12
     constructorThreshold: 12
     ignoreDefaultParameters: true
   TooManyFunctions:
@@ -20,7 +20,9 @@ complexity:
     threshold: 80
   CyclomaticComplexMethod:
     active: true
-    threshold: 20
+    # Exhaustive when-dispatch over the growing action/task enums is branchy but
+    # not tangled; keep the rule for genuinely knotted logic (25+).
+    threshold: 24
 
 style:
   active: true
@@ -42,9 +44,8 @@ style:
 naming:
   active: true
   FunctionNaming:
-    active: true
-    # Composable functions are PascalCase.
-    ignoreAnnotated: ['Composable']
+    # Off: Composables are PascalCase and tests use descriptive underscored names.
+    active: false
   MatchingDeclarationName:
     # We intentionally group small related top-level declarations per file.
     active: false

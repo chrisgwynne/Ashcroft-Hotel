@@ -27,10 +27,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ashcroft.ripple.core.rendering.HotelRenderView
 
 /**
- * The default screen of Ripple: a premium isometric cut-away of The Ashcroft
- * with unobtrusive chrome — date/time, weather and occupancy up top, floor
- * focus and observer time controls, and a temporary information panel for the
- * selected room.
+ * The default screen of Ripple: a premium isometric cut-away of The Ashcroft,
+ * now alive with people moving between rooms. Unobtrusive chrome shows the
+ * clock, weather and occupancy; floor focus and observer time controls sit at
+ * the edges; tapping a person or room opens a readable information panel.
  */
 @Composable
 fun HotelScreen(
@@ -40,12 +40,7 @@ fun HotelScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize()) {
-        HotelSurface(
-            focusedLevel = state.focusedLevel,
-            selectedRoomId = state.selectedRoom?.id,
-            onRoomSelected = viewModel::selectRoom,
-            viewModel = viewModel,
-        )
+        HotelSurface(state = state, viewModel = viewModel)
 
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             HotelHeader(state)
@@ -53,38 +48,49 @@ fun HotelScreen(
         }
 
         Column(
-            modifier =
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(12.dp),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            state.selectedRoom?.let { RoomInfoPanel(it) }
-            TimeControls(state.timeSpeed, viewModel::setTimeSpeed)
+            val why = state.why
+            if (state.whyOpen && why != null) {
+                WhyPanel(
+                    why = why,
+                    developerMode = state.developerMode,
+                    onToggleDeveloperMode = viewModel::toggleDeveloperMode,
+                    onClose = viewModel::toggleWhy,
+                )
+            }
+            state.selectedPerson?.let {
+                PersonPanel(it, onWhy = viewModel::toggleWhy, onFollow = viewModel::toggleFollowSelected)
+            }
+            if (state.selectedPerson == null) {
+                state.selectedRoom?.let { RoomInfoPanel(it, onFollow = viewModel::toggleFollowSelected) }
+            }
+            TimeControls(state.timeSpeed, viewModel::setTimeSpeed, onJump = viewModel::jumpToNextChange)
         }
     }
 }
 
 @Composable
-private fun HotelSurface(
-    focusedLevel: Int,
-    selectedRoomId: com.ashcroft.ripple.core.model.RoomId?,
-    onRoomSelected: (com.ashcroft.ripple.core.model.RoomId?) -> Unit,
-    viewModel: HotelViewModel,
-) {
+private fun HotelSurface(state: HotelUiState, viewModel: HotelViewModel) {
     val scene = remember { viewModel.scene }
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
             HotelRenderView(context).apply {
                 setScene(scene)
-                this.onRoomSelected = onRoomSelected
+                onRoomSelected = { viewModel.selectRoom(it) }
+                onPersonSelected = { viewModel.selectPerson(it) }
             }
         },
         update = { view ->
-            view.setFocusedLevel(focusedLevel)
-            view.setSelectedRoom(selectedRoomId)
+            view.setFocusedLevel(state.focusedLevel)
+            view.setPeople(state.people)
+            view.setSelectedRoom(state.selectedRoom?.id)
+            view.setSelectedPerson(state.selectedPerson?.id)
         },
     )
 }
@@ -103,20 +109,50 @@ private fun HotelHeader(state: HotelUiState) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
             )
+            val tasks = if (state.openTaskCount > 0) "   •   ${state.openTaskCount} jobs on" else ""
             Text(
-                text = "${state.clockLabel}   •   ${state.weatherLabel}   •   ${state.occupancyLabel}",
+                text = "${state.clockLabel}   •   ${state.weatherLabel}   •   ${state.occupancyLabel}$tasks",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            state.pulse.forEach { development ->
+                Text(
+                    text = "Just now: $development",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (state.following.isNotEmpty()) {
+                Text(
+                    text = "Following: ${state.following.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            state.chronicle.lastOrNull()?.let { latest ->
+                Text(
+                    text = "Chronicle: $latest",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            (state.developerHotelIdentity + state.developerDepartments).forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun FloorSelector(
-    state: HotelUiState,
-    onFocusFloor: (Int) -> Unit,
-) {
+private fun FloorSelector(state: HotelUiState, onFocusFloor: (Int) -> Unit) {
     Row(
         modifier = Modifier.padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -132,7 +168,209 @@ private fun FloorSelector(
 }
 
 @Composable
-private fun RoomInfoPanel(room: SelectedRoom) {
+private fun PersonPanel(person: PersonView, onWhy: () -> Unit, onFollow: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = person.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = person.ageAndRole,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            val doing = buildString {
+                append(person.currentAction)
+                append("  ·  ")
+                append(person.actionPhase)
+                person.destination?.let { append("  →  $it") }
+            }
+            Text(
+                text = "${person.mood}  ·  $doing",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            person.currentGoal?.let { goal ->
+                Text(
+                    text = "Trying to $goal",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Text(
+                text = person.reasonSummary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            person.topSupport?.let { Hint("Draws them: $it", top = 4) }
+            person.topConflict?.let { Hint("Pulls against it: $it", top = 2) }
+            NeedsRow(person.needs)
+            SocialSection(person)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(onClick = onWhy) {
+                    Text("Why?")
+                }
+                FilledTonalButton(onClick = onFollow) {
+                    Text(if (person.followed) "Following ✓" else "Follow")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhyPanel(
+    why: WhyView,
+    developerMode: Boolean,
+    onToggleDeveloperMode: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = why.headline,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = why.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            BulletSection("What drew them in", why.positives)
+            BulletSection("What weighed against it", why.negatives)
+            BulletSection(
+                "What they might have done instead",
+                why.alternatives.map { "${it.label} — ${it.whyLower}" },
+            )
+            BulletSection("The deeper why — what led here", why.causalStory)
+            if (developerMode) DeveloperDetail(why)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(onClick = onToggleDeveloperMode) {
+                    Text(if (developerMode) "Hide detail" else "Developer detail")
+                }
+                FilledTonalButton(onClick = onClose) {
+                    Text("Close")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialSection(person: PersonView) {
+    person.duty?.let { Hint("On: $it", top = 6) }
+    person.satisfaction?.let { Hint("Their stay: $it", top = 2) }
+    person.feeling?.let { Hint("Feeling: $it", top = 6) }
+    person.recalledMemory?.let { Hint("Just remembered: $it", top = 2) }
+    person.lastConversation?.let { Hint("Last exchange: $it", top = 2) }
+    BulletSection("They tend to", person.tendencies)
+    BulletSection("Who they're becoming", person.identity)
+    BulletSection("They know", person.relationships)
+    BulletSection("What they believe", person.knows)
+    BulletSection("Recently", person.recentMemories)
+    if (person.developerBeliefs.isNotEmpty() || person.developerFalseBeliefs.isNotEmpty()) {
+        BulletSection("· dev · beliefs vs truth", person.developerBeliefs)
+        BulletSection("· dev · rumours held", person.developerRumours)
+        BulletSection("· dev · false beliefs", person.developerFalseBeliefs)
+        BulletSection("· dev · their history", person.developerHistory)
+        BulletSection("· dev · aspiration", person.developerAspiration)
+        BulletSection("· dev · why (three ways)", person.developerWhyThreeWays)
+    }
+}
+
+@Composable
+private fun Hint(text: String, top: Int) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = top.dp),
+    )
+}
+
+@Composable
+private fun NeedsRow(needs: List<NeedReadout>) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        needs.forEach { need ->
+            Text(
+                text = "${need.label}: ${need.note}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BulletSection(title: String, lines: List<String>) {
+    if (lines.isEmpty()) return
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+    lines.forEach { line ->
+        Text(
+            text = "•  $line",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun DeveloperDetail(why: WhyView) {
+    Text(
+        text = "Score components",
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 10.dp),
+    )
+    why.developerLines.forEach { line ->
+        Text(
+            text = line,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Text(
+        text = why.stochastic,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp),
+    )
+}
+
+@Composable
+private fun RoomInfoPanel(room: SelectedRoom, onFollow: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -149,35 +387,40 @@ private fun RoomInfoPanel(room: SelectedRoom) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            val occupancy = if (room.occupants.isEmpty()) {
+                "Empty right now"
+            } else {
+                "Here now: ${room.occupants.joinToString(", ")}"
+            }
             Text(
-                text = "Footprint ${room.sizeLabel}",
+                text = occupancy,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            FilledTonalButton(onClick = onFollow, modifier = Modifier.padding(top = 10.dp)) {
+                Text(if (room.followed) "Following ✓" else "Follow this room")
+            }
         }
     }
 }
 
 @Composable
-private fun TimeControls(
-    current: TimeSpeed,
-    onSetSpeed: (TimeSpeed) -> Unit,
-) {
+private fun TimeControls(current: TimeSpeed, onSetSpeed: (TimeSpeed) -> Unit, onJump: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TimeSpeed.entries.forEach { speed ->
-            FilledTonalButton(
-                onClick = { onSetSpeed(speed) },
-                modifier = Modifier.padding(0.dp),
-            ) {
+            FilledTonalButton(onClick = { onSetSpeed(speed) }) {
                 Text(
                     text = speed.label,
                     fontWeight = if (speed == current) FontWeight.Bold else FontWeight.Normal,
                 )
             }
+        }
+        FilledTonalButton(onClick = onJump) {
+            Text("→ next change")
         }
     }
 }

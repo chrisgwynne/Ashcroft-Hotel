@@ -51,6 +51,19 @@ data class HotelScene(
 }
 
 /**
+ * A person drawn on the scene at a grid position on a floor. Positions are
+ * fractional so a person can be shown part-way between cells while moving.
+ */
+data class PersonMarker(
+    val id: String,
+    val label: String,
+    val level: Int,
+    val col: Float,
+    val row: Float,
+    val moving: Boolean,
+)
+
+/**
  * Maps a screen tap to the room beneath it. It inverts the camera and
  * projection for the focused floor, then finds the room whose grid footprint
  * contains the resulting cell. The topmost (last drawn) match wins.
@@ -74,5 +87,32 @@ class HitTester(
             if (withinCol && withinRow) return room.id
         }
         return null
+    }
+
+    /**
+     * The id of the person nearest to [screen] within [radiusPx], or null.
+     * People are selected in preference to the room they stand in.
+     */
+    fun personAt(
+        screen: Vec2,
+        camera: Camera,
+        people: List<PersonMarker>,
+        level: Int,
+        radiusPx: Float = 30f,
+    ): String? {
+        var best: String? = null
+        var bestDist = radiusPx * radiusPx
+        for (marker in people) {
+            if (marker.level != level) continue
+            val p = camera.worldToScreen(projection.gridToWorld(marker.col + 0.5f, marker.row + 0.5f, level))
+            val dx = p.x - screen.x
+            val dy = p.y - screen.y
+            val d2 = dx * dx + dy * dy
+            if (d2 <= bestDist) {
+                bestDist = d2
+                best = marker.id
+            }
+        }
+        return best
     }
 }
