@@ -1,6 +1,9 @@
 package com.ashcroft.ripple.core.simulation
 
+import com.ashcroft.ripple.core.model.CausalGraph
+import com.ashcroft.ripple.core.model.CauseRelation
 import com.ashcroft.ripple.core.model.CauseType
+import com.ashcroft.ripple.core.model.SimTime
 import com.ashcroft.ripple.core.world.AshcroftLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -77,6 +80,51 @@ class Phase6CausalTest {
             "and that reference should resolve to a real DECISION node",
             decided.all { rec -> rec.resultingCauseIds.any { state.causes.node(it)?.type == CauseType.DECISION } },
         )
+    }
+
+    @Test
+    fun unmetServiceLowersSatisfactionThroughATraceableChain() {
+        // Overdue neglect is rare (a guest must be kept waiting where they sit), so
+        // capture chains as they are emitted, tick by tick, rather than trust one
+        // late snapshot the pruner may have thinned.
+        var state = AshcroftScenario.initial()
+        val seen = HashSet<String>()
+        var fullChains = 0
+        repeat(2 * 24 * 60) {
+            state = engine.step(state)
+            state.causes.nodes.values.filter { it.type == CauseType.TASK_OVERDUE && seen.add(it.id.value) }.forEach { o ->
+                val fromCreation = state.causes.parentsOf(o.id).any {
+                    state.causes.node(it.parentId)?.type == CauseType.TASK_CREATED
+                }
+                val toSatisfaction = state.causes.childrenOf(o.id).any {
+                    state.causes.node(it.childId)?.type == CauseType.SATISFACTION_CHANGE
+                }
+                assertTrue("an overdue task must sour the guest it kept waiting", toSatisfaction)
+                if (fromCreation && toSatisfaction) fullChains++
+            }
+        }
+        assertTrue("neglect should trace, whole, from a task's creation through to the guest it soured", fullChains > 0)
+    }
+
+    @Test
+    fun consequencesRaiseSignificanceRetrospectively() {
+        // A cause with no consequence keeps its base significance; the same kind of
+        // cause that later sours a guest is reinforced above it, and the echo reaches
+        // its own parent. This is what the pruner reads to keep what mattered.
+        val log0 = CauseLog(SimTime(0))
+        val root = log0.emit(CauseType.TASK_CREATED, "task.x", significance = 0.2)
+        var graph = log0.foldInto(CausalGraph())
+        val log1 = CauseLog(SimTime(1))
+        val consequence = log1.emit(
+            CauseType.TASK_OVERDUE, "task.overdue.x", significance = 0.2, parents = listOf(root to CauseRelation.CAUSED),
+        )
+        log1.reinforce(consequence, 0.3)
+        graph = log1.foldInto(graph)
+        val consequenceSig = graph.node(consequence)!!.significance
+        val rootSig = graph.node(root)!!.significance
+        assertTrue("the consequence is reinforced above its base", consequenceSig > 0.2)
+        assertTrue("and echoes a fraction up to its cause", rootSig > 0.2)
+        assertTrue("the echo is weaker than the direct reinforcement", rootSig < consequenceSig)
     }
 
     @Test

@@ -62,9 +62,10 @@ class SimulationEngine(
         for (event in socials) resolveSocial(event, byId, state.seed, now, log)
 
         val resolvedTasks = resolveTasks(byId, state.tasks, now, log)
-        val people = state.people.map { byId.getValue(it.id) }
-        val tasks = HotelOperations.generate(layout, people, resolvedTasks, now)
-        recordNewTasks(state.tasks, tasks, log)
+        val peopleResolved = state.people.map { byId.getValue(it.id) }
+        val generated = HotelOperations.generate(layout, peopleResolved, resolvedTasks, now)
+        val tasks = recordNewTasks(state.tasks, generated, log)
+        val people = applyOverdueConsequences(resolvedTasks, tasks, peopleResolved, now, log)
         val chronicle = Chronicler.update(state.people, people, state.chronicle, now)
         val merged = log.foldInto(state.causes)
         // Prune only when the cap is exceeded, back to a lower watermark, so the O(n)
@@ -73,11 +74,16 @@ class SimulationEngine(
         return state.copy(clock = now, people = people, chronicle = chronicle, tasks = tasks, causes = causes)
     }
 
-    /** A cause node for each task the operation newly opened, so its resolution can trace back to it. */
-    private fun recordNewTasks(before: List<HotelTask>, after: List<HotelTask>, log: CauseLog) {
+    /**
+     * A cause node for each task the operation newly opened, stamped onto the task
+     * itself so everything it later leads to — its completion, or its going overdue
+     * and souring a guest — can trace back to when it arose.
+     */
+    private fun recordNewTasks(before: List<HotelTask>, after: List<HotelTask>, log: CauseLog): List<HotelTask> {
         val known = before.map { it.id }.toSet()
-        for (task in after.filter { it.id !in known }) {
-            log.emit(
+        return after.map { task ->
+            if (task.id in known) return@map task
+            val cause = log.emit(
                 CauseType.TASK_CREATED,
                 summaryKey = "task.${task.type.name.lowercase()}",
                 significance = task.priority * 0.4,
@@ -86,7 +92,64 @@ class SimulationEngine(
                 location = task.locationId,
                 metadata = mapOf("id" to task.id.value, "type" to task.type.name),
             )
+            task.copy(causeIds = task.causeIds + cause)
         }
+    }
+
+    /**
+     * A guest-facing task the guest asked for that has just lapsed past its
+     * deadline unattended is real neglect: the guest's satisfaction falls and their
+     * frustration rises — and *whether they complain about it remains their own
+     * decision*, taken later by the ordinary conversation logic, never forced here.
+     * The souring reflects significance back on the task that went unserved.
+     */
+    private fun applyOverdueConsequences(
+        before: List<HotelTask>,
+        after: List<HotelTask>,
+        people: List<Person>,
+        now: SimTime,
+        log: CauseLog,
+    ): List<Person> {
+        val wasOpen = before.filter { it.isOpen }.map { it.id }.toSet()
+        val lapsed = after.filter {
+            it.status == HotelTaskStatus.EXPIRED && it.id in wasOpen && it.type.guestFacing && it.requestedBy != null
+        }
+        if (lapsed.isEmpty()) return people
+        val byId = people.associateBy { it.id }.toMutableMap()
+        for (task in lapsed) {
+            val requesterId = task.requestedBy ?: continue
+            val requester = byId[requesterId] ?: continue
+            val stay = requester.stay ?: continue
+            // Only real neglect sours a guest: they must still be there, waiting, when
+            // the request lapses. A guest who has moved on was not kept waiting.
+            if (requester.location.roomId != task.locationId) continue
+            val overdue = log.emit(
+                CauseType.TASK_OVERDUE,
+                summaryKey = "task.overdue.${task.type.name.lowercase()}",
+                significance = task.priority * 0.5,
+                actors = setOf(requesterId),
+                subjects = setOf("task:${task.id.value}"),
+                location = task.locationId,
+                parents = task.causeIds.map { it to CauseRelation.CAUSED },
+            )
+            val drop = if (stay.expectations.contains(GuestValue.SPEED)) OVERDUE_SATISFACTION_SPEED else OVERDUE_SATISFACTION
+            log.emit(
+                CauseType.SATISFACTION_CHANGE,
+                summaryKey = "satisfaction.neglected",
+                significance = drop * 2,
+                actors = setOf(requesterId),
+                subjects = setOf("task:${task.id.value}"),
+                location = task.locationId,
+                parents = listOf(overdue to CauseRelation.CAUSED),
+            )
+            // The consequence reflects back: the unattended task mattered because it soured a guest.
+            log.reinforce(overdue, drop)
+            byId[requesterId] = requester.copy(
+                stay = stay.copy(satisfaction = (stay.satisfaction - drop).coerceAtLeast(0.0)),
+                emotions = requester.emotions.stirred(mapOf(EmotionKind.FRUSTRATION to drop * 2)),
+            )
+        }
+        return people.map { byId.getValue(it.id) }
     }
 
     /**
@@ -549,6 +612,8 @@ class SimulationEngine(
         const val HANDOVER_FIDELITY = 0.9
         const val SATISFACTION_BASELINE = 0.45
         const val SATISFACTION_DRIFT = 0.0004
+        const val OVERDUE_SATISFACTION = 0.03
+        const val OVERDUE_SATISFACTION_SPEED = 0.05
         const val DECISION_SIGNIFICANCE = 0.3
         const val BELIEF_CORRECTION_SIGNIFICANCE = 0.15
         const val RECALL_MATERIAL = 0.08
