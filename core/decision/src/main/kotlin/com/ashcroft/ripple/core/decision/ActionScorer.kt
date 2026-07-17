@@ -6,6 +6,7 @@ import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.CommitmentKind
 import com.ashcroft.ripple.core.model.DeterministicRandom
 import com.ashcroft.ripple.core.model.EmotionKind
+import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.GoalTarget
 import com.ashcroft.ripple.core.model.GoalType
 import com.ashcroft.ripple.core.model.NeedKind
@@ -35,6 +36,7 @@ class ActionScorer {
         goalProgress(candidate, context, components)
         personalityFit(candidate, actor, components)
         emotionalFit(candidate, actor, components)
+        cultureFit(candidate, context, components)
         habitAndRepetition(candidate, actor, components)
         socialFactors(candidate, context, components)
         costs(candidate, context, components)
@@ -130,6 +132,45 @@ class ActionScorer {
         if (failures > 0) {
             out += ScoreComponent(ScoreComponentType.RECENT_REPETITION, -min(failures, 4) * FAILURE_STEP, "it has not worked out recently")
         }
+    }
+
+    /**
+     * How a place's accumulated character pulls on a choice. A department reliable
+     * and brisk in its evidence makes its people lean into work; a warm, generous one
+     * makes reaching out feel a shade more natural; a diligent culture makes idling
+     * feel slightly out of step. Culture only ever biases — the weight is small, it is
+     * confidence-weighted (an unformed culture exerts nothing), and it loses to a real
+     * need every time. This is where a long history quietly changes how the world runs.
+     */
+    private fun cultureFit(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
+        val culture = ctx.culture
+        if (culture.isEmpty) return
+        val diligence = (
+            culture.strength(EvidenceDimension.RELIABILITY) +
+                culture.strength(EvidenceDimension.COMPETENCE) +
+                culture.strength(EvidenceDimension.RESPONSIVENESS)
+        ) / 3.0
+        val warmth = (
+            culture.strength(EvidenceDimension.WARMTH) +
+                culture.strength(EvidenceDimension.GENEROSITY)
+        ) / 2.0
+        val value = when {
+            candidate.verb == ActionVerb.WORK || candidate.verb == ActionVerb.ATTEND -> diligence * CULTURE_WEIGHT
+            candidate.verb.social -> warmth * CULTURE_WEIGHT
+            isLeisure(candidate.verb) -> -diligence * CULTURE_IDLE_WEIGHT
+            else -> 0.0
+        }
+        if (abs(value) > 1e-6) {
+            out += ScoreComponent(ScoreComponentType.CULTURE_FIT, value, cultureExplanation(candidate.verb, diligence, warmth))
+        }
+    }
+
+    private fun cultureExplanation(verb: ActionVerb, diligence: Double, warmth: Double): String = when {
+        (verb == ActionVerb.WORK || verb == ActionVerb.ATTEND) && diligence >= 0 -> "it is how things are done here"
+        verb == ActionVerb.WORK || verb == ActionVerb.ATTEND -> "the place has grown slack about this"
+        verb.social && warmth >= 0 -> "this is a warm place to be"
+        verb.social -> "people here keep to themselves"
+        else -> "it sits against how things are done here"
     }
 
     private fun socialFactors(candidate: ActionCandidate, ctx: DecisionContext, out: MutableList<ScoreComponent>) {
@@ -279,6 +320,8 @@ class ActionScorer {
         const val TASK_WEIGHT = 0.7
         const val TASK_ON_SHIFT = 0.2
         const val TASK_GUEST_FACING = 0.1
+        const val CULTURE_WEIGHT = 0.35
+        const val CULTURE_IDLE_WEIGHT = 0.15
         const val NOISE = 0.15
     }
 }

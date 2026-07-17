@@ -2,6 +2,7 @@ package com.ashcroft.ripple.core.simulation
 
 import com.ashcroft.ripple.core.model.CausalGraph
 import com.ashcroft.ripple.core.model.ChronicleEntry
+import com.ashcroft.ripple.core.model.CultureRegistry
 import com.ashcroft.ripple.core.model.EvidenceLedger
 import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.Person
@@ -27,6 +28,8 @@ data class WorldState(
     val tasks: List<HotelTask> = emptyList(),
     val causes: CausalGraph = CausalGraph(),
     val evidence: EvidenceLedger = EvidenceLedger.EMPTY,
+    /** The slowly-forming character of each room, department and the hotel (Phase 7D). */
+    val culture: CultureRegistry = CultureRegistry.EMPTY,
 ) {
     fun person(id: PersonId): Person? = people.firstOrNull { it.id == id }
 

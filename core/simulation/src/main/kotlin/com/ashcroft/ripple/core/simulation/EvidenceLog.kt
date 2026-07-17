@@ -1,6 +1,7 @@
 package com.ashcroft.ripple.core.simulation
 
 import com.ashcroft.ripple.core.model.CauseId
+import com.ashcroft.ripple.core.model.CultureRegistry
 import com.ashcroft.ripple.core.model.EntityId
 import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.EvidenceId
@@ -132,6 +133,25 @@ internal class EvidenceLog(private val now: SimTime) {
         return if (next.size > LEDGER_CAP) next.prunedTo(LEDGER_LOW) else next
     }
 
+    /**
+     * Fold this tick's entity evidence (about rooms, departments, the hotel) into the
+     * slowly-moving culture profiles. Culture ages far more gently than a personal
+     * standing — character is the residue of a long history, so one event barely
+     * registers and only repetition makes a trait characteristic.
+     */
+    fun applyCulture(registry: CultureRegistry): CultureRegistry {
+        if (pending.isEmpty()) return registry
+        var next = registry
+        for (p in pending) {
+            if (p !is EntityPending) continue
+            val e = p.evidence
+            next = next.with(e.subjectId) {
+                it.observe(e.dimension, e.direction, e.strength * CULTURE_WEIGHT, e.id, now, CULTURE_DECAY)
+            }
+        }
+        return next
+    }
+
     /** Fold each piece of evidence into the standings of the people who witnessed it. */
     fun applyStandings(byId: MutableMap<PersonId, Person>) {
         for (p in pending) {
@@ -181,6 +201,12 @@ internal class EvidenceLog(private val now: SimTime) {
         const val STANDING_DECAY = 0.999
         const val LEDGER_CAP = 4_000
         const val LEDGER_LOW = 3_000
+
+        /** Each event contributes only a fraction of its weight to culture, which builds over time... */
+        const val CULTURE_WEIGHT = 0.35
+
+        /** ...and ages very slowly, so a place's character reflects its whole history, not the last hour. */
+        const val CULTURE_DECAY = 0.9997
 
         /** The evidence axis each social standing axis is recorded under (same names). */
         val EVIDENCE_OF_STANDING: Map<StandingDimension, EvidenceDimension> = mapOf(

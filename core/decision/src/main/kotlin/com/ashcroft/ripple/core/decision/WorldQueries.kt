@@ -50,4 +50,11 @@ interface WorldQueries {
 
     /** Open tasks [actor] is permitted (by role) and able (by reach) to take on right now. */
     fun openTasksFor(actor: Person): List<TaskOffer>
+
+    /**
+     * The cultural pull on [actor] right now — their department's character blended
+     * with the hotel's. Defaults to none so implementations that predate culture (and
+     * tests) need not supply it; the real hotel derives it from accumulated evidence.
+     */
+    fun cultureFor(actor: Person): CultureLens = CultureLens.NONE
 }

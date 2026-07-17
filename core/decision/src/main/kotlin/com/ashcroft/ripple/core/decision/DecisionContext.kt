@@ -3,6 +3,7 @@ package com.ashcroft.ripple.core.decision
 import com.ashcroft.ripple.core.model.ActionCandidate
 import com.ashcroft.ripple.core.model.ActionVerb
 import com.ashcroft.ripple.core.model.Commitment
+import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.Goal
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.Person
@@ -24,6 +25,25 @@ data class PerceivedPerson(
     val sentiment: Double,
     val alreadyKnown: Boolean,
 )
+
+/**
+ * The cultural pull the actor is under: the pronounced traits of their department
+ * and the hotel, already blended into a single confidence-weighted strength per
+ * axis (-1..1). Culture *biases* a choice — a diligent department makes work feel
+ * a shade more natural, a warm one makes reaching out easier — but it never
+ * dictates; the weight is deliberately small and it competes with everything else.
+ */
+data class CultureLens(
+    val traits: Map<EvidenceDimension, Double> = emptyMap(),
+) {
+    fun strength(dimension: EvidenceDimension): Double = traits[dimension] ?: 0.0
+
+    val isEmpty: Boolean get() = traits.isEmpty()
+
+    companion object {
+        val NONE = CultureLens()
+    }
+}
 
 /** Something the actor knows they could do somewhere, from role and familiar areas. */
 data class KnownOpportunity(
@@ -49,4 +69,6 @@ data class DecisionContext(
     val availableActions: List<ActionCandidate>,
     val availableTasks: List<TaskOffer>,
     val simTime: SimTime,
+    /** The character of the actor's department and the hotel, as it bears on this choice (Phase 7D). */
+    val culture: CultureLens = CultureLens.NONE,
 )

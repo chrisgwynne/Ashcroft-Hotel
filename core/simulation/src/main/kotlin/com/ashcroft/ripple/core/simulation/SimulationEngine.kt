@@ -64,7 +64,7 @@ class SimulationEngine(
 
     fun step(state: WorldState): WorldState {
         val now = state.clock + 1
-        val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks)
+        val world = HotelWorldQueries(layout, graph, locator, state.people, state.tasks, state.culture)
         val decider = DecisionMaker(world)
         val log = CauseLog(now)
         val evidence = EvidenceLog(now)
@@ -94,6 +94,9 @@ class SimulationEngine(
             tasks = tasks,
             causes = causes,
             evidence = evidence.foldInto(state.evidence),
+            // The same entity evidence that soured or warmed a guest also, in slow
+            // aggregate, becomes the character of the departments and the hotel.
+            culture = evidence.applyCulture(state.culture),
         )
     }
 
@@ -255,6 +258,10 @@ class SimulationEngine(
         completedCause: CauseId,
         evidence: EvidenceLog,
     ) {
+        // Work done is the department's character too — whether or not anyone was watching.
+        val dept = EntityId.department(task.department)
+        evidence.entity(dept, EvidenceDimension.COMPETENCE, GOOD, WORK_EVIDENCE, workerId, setOf(completedCause))
+        evidence.entity(dept, EvidenceDimension.RELIABILITY, GOOD, WORK_EVIDENCE * 0.8, workerId, setOf(completedCause))
         val observers = byId.values
             .filter { it.role.isStaff && it.id != workerId && it.location.roomId == task.locationId }
             .map { it.id }.toSet()
@@ -344,6 +351,10 @@ class SimulationEngine(
             evidence.professional(serverId, ProfessionalDimension.COMPETENCE, GOOD, SERVICE_EVIDENCE * 0.7, staffObservers, cause)
         }
         evidence.entity(EntityId.HOTEL, EvidenceDimension.RESPONSIVENESS, GOOD, SERVICE_EVIDENCE * 0.8, requesterId, setOf(service))
+        // The department that did the work earns its own character for it — brisk, warm.
+        val dept = EntityId.department(task.department)
+        evidence.entity(dept, EvidenceDimension.RESPONSIVENESS, GOOD, SERVICE_EVIDENCE * 0.8, requesterId, setOf(service))
+        evidence.entity(dept, EvidenceDimension.WARMTH, GOOD, SERVICE_EVIDENCE * 0.5, requesterId, setOf(service))
         val memCause = log.emit(
             CauseType.MEMORY_CREATED,
             summaryKey = "memory.was_helped",

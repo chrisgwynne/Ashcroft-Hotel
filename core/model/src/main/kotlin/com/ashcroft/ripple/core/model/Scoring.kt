@@ -27,6 +27,7 @@ enum class ScoreComponentType {
     FUTURE_OPPORTUNITY_VALUE,
     COMMITMENT_CONFLICT,
     RECENT_REPETITION,
+    CULTURE_FIT,
 }
 
 /** One contribution to an action's score. [value] may be negative (a cost). */
