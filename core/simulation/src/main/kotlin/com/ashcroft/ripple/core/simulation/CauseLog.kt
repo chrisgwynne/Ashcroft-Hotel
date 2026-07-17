@@ -52,11 +52,15 @@ internal class CauseLog(private val now: SimTime) {
         if (amount > 0.0) reinforcements.add(cause to amount)
     }
 
-    /** Merge every pending node, link and reinforcement into [graph] in a single pass (one copy, not one per change). */
+    /**
+     * Merge every pending node, link and reinforcement into [graph]. The persistent
+     * builders share structure with the receiver, so a tick pays only for what it
+     * adds (a few puts and appends) — never a copy of the whole graph.
+     */
     fun foldInto(graph: CausalGraph): CausalGraph {
         if (pending.isEmpty() && reinforcements.isEmpty()) return graph
-        val nodes = LinkedHashMap(graph.nodes)
-        val edges = ArrayList(graph.edges)
+        val nodes = graph.nodes.builder()
+        val edges = graph.edges.builder()
         for ((node, parents) in pending) {
             nodes[node.id] = node
             for ((parentId, relation) in parents) {
@@ -68,7 +72,7 @@ internal class CauseLog(private val now: SimTime) {
             for (e in edges) parentsOf.getOrPut(e.childId) { ArrayList() }.add(e.parentId)
             for ((id, amount) in reinforcements) applyReinforce(nodes, parentsOf, id, amount, REINFORCE_DEPTH)
         }
-        return CausalGraph(nodes, edges)
+        return CausalGraph(nodes.build(), edges.build())
     }
 
     private fun applyReinforce(

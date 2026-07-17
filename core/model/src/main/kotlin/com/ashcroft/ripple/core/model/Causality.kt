@@ -1,6 +1,15 @@
 package com.ashcroft.ripple.core.model
 
+import kotlinx.collections.immutable.PersistentList
+import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toPersistentList
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /**
  * The kind of meaningful state change a cause node records. Nodes are created
@@ -92,20 +101,24 @@ data class CauseEdge(
  * acyclic by construction. This is the record the "Why?" and chronicle layers
  * read from — they may summarise it, never fabricate it.
  */
-@Serializable
+@Serializable(with = CausalGraphSerializer::class)
 data class CausalGraph(
-    val nodes: Map<CauseId, CauseNode> = emptyMap(),
-    val edges: List<CauseEdge> = emptyList(),
+    val nodes: PersistentMap<CauseId, CauseNode> = persistentMapOf(),
+    val edges: PersistentList<CauseEdge> = persistentListOf(),
 ) {
     val size: Int get() = nodes.size
 
     fun node(id: CauseId): CauseNode? = nodes[id]
 
-    /** Add a node and its links to already-existing parent causes (missing parents are skipped). */
+    /**
+     * Add a node and its links to already-existing parent causes (missing parents
+     * are skipped). The persistent nodes/edges share structure with the receiver,
+     * so this is a cheap structural update — no whole-map copy.
+     */
     fun add(node: CauseNode, parents: List<Pair<CauseId, CauseRelation>> = emptyList(), strength: Double = 1.0): CausalGraph {
         val newEdges = parents.filter { nodes.containsKey(it.first) }
             .map { CauseEdge(it.first, node.id, it.second, strength) }
-        return copy(nodes = nodes + (node.id to node), edges = edges + newEdges)
+        return CausalGraph(nodes.put(node.id, node), edges.addAll(newEdges))
     }
 
     /**
@@ -116,10 +129,7 @@ data class CausalGraph(
     fun prunedTo(maxNodes: Int): CausalGraph {
         if (nodes.size <= maxNodes) return this
         val keep = nodes.keys.toList().takeLast(maxNodes).toSet()
-        return CausalGraph(
-            nodes.filterKeys { it in keep },
-            edges.filter { it.parentId in keep && it.childId in keep },
-        )
+        return rebuild(keep)
     }
 
     /**
@@ -150,9 +160,16 @@ data class CausalGraph(
                 .map { it.id }
         }
         if (keep.size >= nodes.size) return this
+        return rebuild(keep)
+    }
+
+    /** Build a new graph keeping exactly [keep], in original insertion order, with only edges among them. */
+    private fun rebuild(keep: Set<CauseId>): CausalGraph {
+        val builder = persistentMapOf<CauseId, CauseNode>().builder()
+        for ((id, node) in nodes) if (id in keep) builder[id] = node
         return CausalGraph(
-            nodes.filterKeys { it in keep },
-            edges.filter { it.parentId in keep && it.childId in keep },
+            builder.build(),
+            edges.filter { it.parentId in keep && it.childId in keep }.toPersistentList(),
         )
     }
 
@@ -199,5 +216,33 @@ data class CausalGraph(
             if (seen.add(next)) stack.addAll(step(next))
         }
         return seen
+    }
+}
+
+/** The on-disk shape of a graph: nodes as an ordered list (their map key is their own id) plus edges. */
+@Serializable
+private data class CausalGraphSurrogate(val nodes: List<CauseNode>, val edges: List<CauseEdge>)
+
+/**
+ * Serialises a [CausalGraph] through a flat list surrogate, so the runtime form can
+ * use structurally-shared persistent collections while the stored form stays a plain,
+ * stable, ordered list. Deserialisation rebuilds the node map in stored order, so
+ * insertion-order-dependent pruning replays identically after a save/load.
+ */
+object CausalGraphSerializer : KSerializer<CausalGraph> {
+    override val descriptor: SerialDescriptor = CausalGraphSurrogate.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: CausalGraph) {
+        encoder.encodeSerializableValue(
+            CausalGraphSurrogate.serializer(),
+            CausalGraphSurrogate(value.nodes.values.toList(), value.edges),
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): CausalGraph {
+        val surrogate = decoder.decodeSerializableValue(CausalGraphSurrogate.serializer())
+        val builder = persistentMapOf<CauseId, CauseNode>().builder()
+        for (node in surrogate.nodes) builder[node.id] = node
+        return CausalGraph(builder.build(), surrogate.edges.toPersistentList())
     }
 }

@@ -1,5 +1,7 @@
 package com.ashcroft.ripple.core.model
 
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -77,8 +79,8 @@ class CausalGraphTest {
     fun aCycleWouldBeDetected() {
         // Hand-craft a cyclic edge set (the builder never produces one) and confirm detection.
         val cyclic = CausalGraph(
-            nodes = mapOf(CauseId("a") to node("a"), CauseId("b") to node("b")),
-            edges = listOf(
+            nodes = persistentMapOf(CauseId("a") to node("a"), CauseId("b") to node("b")),
+            edges = persistentListOf(
                 CauseEdge(CauseId("a"), CauseId("b"), CauseRelation.CAUSED, 1.0),
                 CauseEdge(CauseId("b"), CauseId("a"), CauseRelation.CAUSED, 1.0),
             ),
