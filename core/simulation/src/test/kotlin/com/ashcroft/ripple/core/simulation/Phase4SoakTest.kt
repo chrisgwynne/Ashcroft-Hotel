@@ -67,11 +67,12 @@ class Phase4SoakTest {
         var staffGuest = 0
         var guestGuest = 0
         var maxFalse = 0
-        var corrected = 0
         val lastConvAt = HashMap<String, Long>()
         val rumourTopics = HashSet<String>()
-        val falseNow = HashSet<String>()
-        val everFalse = HashSet<String>()
+        // A correction is a recorded fact, not a churn artefact: count the distinct
+        // BELIEF_CORRECTED cause nodes the run actually produced (each captured the
+        // step it was emitted, before pruning can ever reach it).
+        val correctionIds = HashSet<String>()
         val actChains = HashMap<String, Int>()
         val verbCounts = HashMap<String, HashMap<ActionVerb, Int>>()
 
@@ -102,12 +103,11 @@ class Phase4SoakTest {
                     actChains.merge("${p.id.value}->${convo.withPerson.value}:${convo.act}", 1, Int::plus)
                 }
             }
-            val false0 = WorldTruth.falseBeliefs(state).map { "${it.first.value}:${it.second.topicKey}" }.toSet()
-            maxFalse = maxOf(maxFalse, false0.size)
-            falseNow.filter { it !in false0 }.forEach { corrected++ }
-            falseNow.clear()
-            falseNow.addAll(false0)
-            everFalse.addAll(false0)
+            val false0 = WorldTruth.falseBeliefs(state).size
+            maxFalse = maxOf(maxFalse, false0)
+            state.causes.nodes.values.forEach {
+                if (it.type == com.ashcroft.ripple.core.model.CauseType.BELIEF_CORRECTED) correctionIds.add(it.id.value)
+            }
         }
 
         return Report(
@@ -119,7 +119,7 @@ class Phase4SoakTest {
             misunderstood = misunderstood,
             rumoursCreated = rumourTopics.size,
             maxFalseBeliefs = maxFalse,
-            falseBeliefsCorrected = corrected,
+            falseBeliefsCorrected = correctionIds.size,
             avgMemories = state.people.map { it.memories.size }.average(),
             recallRate = recallTicks.toDouble() / (days * 24 * 60 * state.people.size),
             relationshipAxesUsed = axesUsed(state.people),

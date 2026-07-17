@@ -56,6 +56,30 @@ class Phase6CausalTest {
     }
 
     @Test
+    fun firsthandBeliefCorrectionsAreRecordedWithProvenance() {
+        // People move about and re-see each other; a confident belief seen to be
+        // wrong is corrected, and that correction is a real recorded event.
+        val state = engine.run(AshcroftScenario.initial(), 8 * 60)
+        val corrections = state.causes.nodes.values.filter { it.type == CauseType.BELIEF_CORRECTED }
+        assertTrue("ordinary life should overturn some stale beliefs", corrections.isNotEmpty())
+        assertTrue(
+            "a correction records the value it overturned, not an invented one",
+            corrections.all { it.metadata["was"] != null && it.metadata["now"] != null && it.metadata["was"] != it.metadata["now"] },
+        )
+    }
+
+    @Test
+    fun decisionsPointBackAtTheCauseTheyProduced() {
+        val state = engine.run(AshcroftScenario.initial(), 3 * 60)
+        val decided = state.people.mapNotNull { it.lastDecision }.filter { it.resultingCauseIds.isNotEmpty() }
+        assertTrue("a made decision should reference its own cause node", decided.isNotEmpty())
+        assertTrue(
+            "and that reference should resolve to a real DECISION node",
+            decided.all { rec -> rec.resultingCauseIds.any { state.causes.node(it)?.type == CauseType.DECISION } },
+        )
+    }
+
+    @Test
     fun serviceInteractionsFormATraceableChain() {
         val state = engine.run(AshcroftScenario.initial(), 12 * 60)
         val service = state.causes.nodes.values.filter { it.type == CauseType.SERVICE_INTERACTION }

@@ -53,6 +53,28 @@ internal object Perception {
     private fun observed(topic: FactTopic, value: String, confidence: Double, now: SimTime): Belief =
         Belief(Claim(topic, value), confidence, InformationSource.OBSERVED, now)
 
+    /** A belief the person overturned this tick by seeing the truth for themselves. */
+    data class Correction(val topic: FactTopic, val oldValue: String, val newValue: String)
+
+    /**
+     * The firsthand corrections a person made this tick: a topic they held a
+     * confident belief about, whose value they have just seen — with their own
+     * eyes, [InformationSource.OBSERVED], acquired [now] — to be something else.
+     * Re-seeing the same thing, learning a topic for the first time, or updating a
+     * vague half-forgotten hunch are not corrections; only overturning a belief
+     * held firmly enough to have acted on counts. This is what makes "a false
+     * belief was corrected" a real, recorded event rather than a churn artefact.
+     */
+    fun firsthandCorrections(before: KnowledgeBase, after: KnowledgeBase, now: SimTime): List<Correction> =
+        after.all.mapNotNull { belief ->
+            if (belief.source != InformationSource.OBSERVED || belief.acquiredAt != now) return@mapNotNull null
+            val prior = before.about(belief.claim.topic) ?: return@mapNotNull null
+            if (prior.confidence < CORRECTION_FLOOR || prior.claim.value == belief.claim.value) return@mapNotNull null
+            Correction(belief.claim.topic, prior.claim.value, belief.claim.value)
+        }
+
+    private const val CORRECTION_FLOOR = 0.5
+
     /** A guest of means is the sort of arrival other people notice and talk about. */
     fun isNotable(person: Person): Boolean = person.role == RoleKind.GUEST && person.money >= NOTABLE_MONEY
 

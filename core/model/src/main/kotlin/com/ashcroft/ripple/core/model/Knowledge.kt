@@ -120,6 +120,12 @@ data class KnowledgeBase(private val beliefs: Map<String, Belief> = emptyMap()) 
     fun weathered(factor: Double): KnowledgeBase =
         KnowledgeBase(beliefs.mapValues { (_, b) -> b.copy(confidence = (b.confidence * factor).coerceIn(0.0, 1.0)) })
 
+    /** Attach a causal record to the belief currently held on [topic] (no-op if none is held). */
+    fun stamp(topic: FactTopic, causeId: CauseId): KnowledgeBase {
+        val existing = beliefs[topic.key] ?: return this
+        return KnowledgeBase(beliefs + (topic.key to existing.copy(causeId = causeId)))
+    }
+
     companion object {
         val EMPTY = KnowledgeBase()
     }

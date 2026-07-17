@@ -21,6 +21,7 @@ import com.ashcroft.ripple.core.model.HotelTask
 import com.ashcroft.ripple.core.model.HotelTaskStatus
 import com.ashcroft.ripple.core.model.HotelTaskType
 import com.ashcroft.ripple.core.model.InformationSource
+import com.ashcroft.ripple.core.model.KnowledgeBase
 import com.ashcroft.ripple.core.model.Memory
 import com.ashcroft.ripple.core.model.MemoryId
 import com.ashcroft.ripple.core.model.MemoryKind
@@ -236,9 +237,10 @@ class SimulationEngine(
         log: CauseLog,
     ): Advance {
         val effective = effectiveActivity(person)
+        val knowledge = perceive(person, everyone, now, log)
         val perceived = person.copy(
             needs = NeedDynamics.tick(person.needs, effective),
-            knowledge = Perception.observe(person, everyone, now),
+            knowledge = knowledge,
             emotions = EmotionDynamics.tick(person),
             // Satisfaction ebbs toward a modest baseline between attentions, so a
             // well-served guest stays content and a neglected one quietly sours.
@@ -257,7 +259,7 @@ class SimulationEngine(
                 .filter { it.id in result.record.relevantMemoryIds && it.causeId != null }
                 .mapNotNull { it.causeId }
                 .map { it to CauseRelation.MOTIVATED }
-            log.emit(
+            val decisionCause = log.emit(
                 CauseType.DECISION,
                 summaryKey = "decision.${result.action.verb.name.lowercase()}",
                 significance = DECISION_SIGNIFICANCE,
@@ -266,9 +268,50 @@ class SimulationEngine(
                 metadata = mapOf("verb" to result.action.verb.name),
                 parents = memoryCauses,
             )
-            return applyDecision(withNeeds.copy(goals = result.goals, lastDecision = result.record), result.action, now)
+            // Close the loop: the record points at the cause it produced, so the
+            // "Why?" layer can walk from a decision to its place in the graph.
+            val record = result.record.copy(resultingCauseIds = result.record.resultingCauseIds + decisionCause)
+            return applyDecision(withNeeds.copy(goals = result.goals, lastDecision = record), result.action, now)
         }
         return Advance(advanceAction(withNeeds, now), social = null)
+    }
+
+    /**
+     * Update a person's knowledge from what they can see, and record any *firsthand
+     * correction* — a confident belief they have just seen to be wrong — as a cause
+     * node, stamping the corrected belief with its provenance. Routine re-observation
+     * and first-time learning leave no node; only a real overturning does.
+     */
+    private fun perceive(person: Person, everyone: List<Person>, now: SimTime, log: CauseLog): KnowledgeBase {
+        var kb = Perception.observe(person, everyone, now)
+        val corrections = Perception.firsthandCorrections(person.knowledge, kb, now)
+        for (correction in corrections) {
+            val cause = log.emit(
+                CauseType.BELIEF_CORRECTED,
+                summaryKey = "belief.corrected.${topicKind(correction.topic)}",
+                significance = BELIEF_CORRECTION_SIGNIFICANCE,
+                actors = setOf(person.id),
+                subjects = setOf(subjectKeyOf(correction.topic)),
+                location = person.location.roomId,
+                metadata = mapOf("was" to correction.oldValue, "now" to correction.newValue),
+            )
+            kb = kb.stamp(correction.topic, cause)
+        }
+        return kb
+    }
+
+    private fun topicKind(topic: FactTopic): String = when (topic) {
+        is FactTopic.RoomOccupancy -> "occupancy"
+        is FactTopic.Whereabouts -> "whereabouts"
+        is FactTopic.PersonMood -> "mood"
+        is FactTopic.NotableGuest -> "notable"
+    }
+
+    private fun subjectKeyOf(topic: FactTopic): String = when (topic) {
+        is FactTopic.RoomOccupancy -> "room:${topic.room.value}"
+        is FactTopic.Whereabouts -> "person:${topic.person.value}"
+        is FactTopic.PersonMood -> "person:${topic.person.value}"
+        is FactTopic.NotableGuest -> "person:${topic.person.value}"
     }
 
     /**
@@ -293,8 +336,12 @@ class SimulationEngine(
         )
         val result = MemoryRecall.recall(person, ctx, now)
         val recalled = result.recalled ?: return person.copy(recalledMemoryId = null)
-        // Recall is a cause in its own right, remembered from the original moment.
-        if (result.emotionDeltas.isNotEmpty()) {
+        // Recall is a cause only when it genuinely moves the person — a faint,
+        // half-noticed memory colouring the mood is background churn, not a recorded
+        // consequence. Recording only material stirs keeps meaningful history from
+        // being buried (and pruned away) under routine reminiscence.
+        val stir = result.emotionDeltas.values.maxOfOrNull { kotlin.math.abs(it) } ?: 0.0
+        if (stir >= RECALL_MATERIAL) {
             log.emit(
                 CauseType.MEMORY_RECALLED,
                 summaryKey = "recall.${recalled.kind.name.lowercase()}",
@@ -503,6 +550,8 @@ class SimulationEngine(
         const val SATISFACTION_BASELINE = 0.45
         const val SATISFACTION_DRIFT = 0.0004
         const val DECISION_SIGNIFICANCE = 0.3
+        const val BELIEF_CORRECTION_SIGNIFICANCE = 0.15
+        const val RECALL_MATERIAL = 0.08
         const val CONVERSATION_SIGNIFICANCE = 0.35
         const val REL_CHANGE_SIGNIFICANCE = 0.3
         const val REL_MATERIAL = 0.03
