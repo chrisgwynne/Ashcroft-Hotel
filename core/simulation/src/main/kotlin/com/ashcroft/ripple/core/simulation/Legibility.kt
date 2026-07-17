@@ -58,6 +58,25 @@ data class RelationshipView(
     val sharedContext: List<String>,
 )
 
+/** One titled section of a readable life. */
+data class ProfileSection(val title: String, val lines: List<String>)
+
+/**
+ * A person read as a life, not a record — grouped into the sections a player
+ * actually thinks in: what they are doing *now*, the shape of their *life*, the
+ * *people* who matter to them, what they *believe*, and who they are becoming
+ * (*identity*). Every line is derived from real state; nothing is invented.
+ */
+data class ProfileView(
+    val name: String,
+    val subtitle: String,
+    val now: ProfileSection,
+    val life: ProfileSection,
+    val people: ProfileSection,
+    val beliefs: ProfileSection,
+    val identity: ProfileSection,
+)
+
 /** One strand of a place's character: a short label and the evidence-grounded sentence behind it. */
 data class IdentityTrait(val label: String, val sentence: String)
 
@@ -214,6 +233,63 @@ object Legibility {
         }
     }
 
+    /** Assemble a person's full, readable profile, grouped into the five natural sections. */
+    fun profile(state: WorldState, id: PersonId): ProfileView? {
+        val person = state.person(id) ?: return null
+        val reputation = reputationOf(state, id)
+        return ProfileView(
+            name = person.name,
+            subtitle = person.role.name.lowercase().replace('_', ' '),
+            now = ProfileSection(
+                "Now",
+                buildList {
+                    add("where: ${person.location.roomId?.value ?: "—"}")
+                    add("doing: ${person.action.verb.name.lowercase().replace('_', ' ')} (${person.action.phase.name.lowercase()})")
+                    person.goals.maxByOrNull { it.priority }?.let { add("trying to ${it.type.name.lowercase().replace('_', ' ')}") }
+                    person.emotions.strongest?.let { add("feeling ${it.name.lowercase()}") }
+                    person.stay?.let { add("stay satisfaction ${round(it.satisfaction)}") }
+                    Inspectors.why(state, id).firstOrNull()?.let { add(it) }
+                },
+            ),
+            life = ProfileSection(
+                "Life",
+                buildList {
+                    val milestones = state.chronicle.filter { id in it.involved }.takeLast(TOP)
+                    addAll(milestones.map { "· ${it.headline}" })
+                    person.memories.filter { it.importance >= 0.4 }.takeLast(TOP)
+                        .forEach { add("remembers: ${it.kind.name.lowercase().replace('_', ' ')}") }
+                    person.aspiration?.takeIf { it.drive > 0.0 }
+                        ?.let { add("aspires: ${it.focus.name.lowercase()} (drive ${round(it.drive)})") }
+                    val settled = person.habits.settled().values.sortedByDescending { it.strength }.take(TOP)
+                    if (settled.isNotEmpty()) add("habits: ${settled.joinToString(", ") { readableCustom(it.key) }}")
+                },
+            ),
+            people = ProfileSection(
+                "People",
+                buildList {
+                    person.relationships.all.sortedByDescending { it.warmth() }.take(TOP).forEach {
+                        add("${state.person(it.other)?.name ?: it.other.value}: ${headline(it.warmth(), it[RelationDimension.RESENTMENT])}")
+                    }
+                    if (reputation.divided) add("others are divided about them")
+                },
+            ),
+            beliefs = ProfileSection(
+                "Beliefs",
+                buildList {
+                    addAll(Inspectors.beliefs(state, id).take(TOP))
+                    Inspectors.rumours(state, id).take(2).forEach { add("hearsay: $it") }
+                },
+            ),
+            identity = ProfileSection(
+                "Identity",
+                buildList {
+                    add(reputation.summary)
+                    addAll(Inspectors.aspirationOf(state, id))
+                },
+            ),
+        )
+    }
+
     fun departmentIdentity(state: WorldState, dept: Department): IdentityView {
         val entity = EntityId.department(dept)
         val team = state.people.count { it.role.isStaff && it.role.department() == dept }
@@ -267,6 +343,8 @@ object Legibility {
             else -> verb
         }
     }
+
+    private fun round(v: Double): Double = kotlin.math.round(v * 100) / 100.0
 
     /** The adjective each culture axis reads as, positive and negative. */
     private val TRAIT_WORDS: Map<EvidenceDimension, Pair<String, String>> = mapOf(

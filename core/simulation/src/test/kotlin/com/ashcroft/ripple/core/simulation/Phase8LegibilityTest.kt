@@ -83,6 +83,27 @@ class Phase8LegibilityTest {
     }
 
     @Test
+    fun profileReadsAsALifeInFiveSections() {
+        val state = engine.run(AshcroftScenario.initial(), 2 * 24 * 60)
+        val someone = state.people.first { it.role.isStaff }
+        val profile = Legibility.profile(state, someone.id)!!
+        assertTrue("named", profile.name.isNotBlank())
+        assertEquals(
+            "the five sections are titled as expected", listOf("Now", "Life", "People", "Beliefs", "Identity"),
+            listOf(
+                profile.now.title, profile.life.title, profile.people.title, profile.beliefs.title, profile.identity.title,
+            ),
+        )
+        // "Now" always says what they are doing and where.
+        assertTrue(
+            "now has a location and an action",
+            profile.now.lines.any { it.startsWith("where:") } && profile.now.lines.any { it.startsWith("doing:") },
+        )
+        // Identity carries the reputation summary prose.
+        assertTrue("identity summarises how they are regarded", profile.identity.lines.isNotEmpty())
+    }
+
+    @Test
     fun legibilityIsDeterministic() {
         val start = AshcroftScenario.initial()
         val a = engine.run(start, 1000)
