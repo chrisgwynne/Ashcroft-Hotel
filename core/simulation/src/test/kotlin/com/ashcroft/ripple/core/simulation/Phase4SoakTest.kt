@@ -8,6 +8,7 @@ import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.ScoreComponentType
 import com.ashcroft.ripple.core.world.AshcroftLayout
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -19,6 +20,11 @@ import org.junit.Test
  */
 class Phase4SoakTest {
     private val engine = SimulationEngine(AshcroftLayout.build())
+
+    // The multi-day/seed soaks below are too slow for the shared CI runner, so each
+    // opts in via RIPPLE_SOAK; the fast decision-influence test is left to run always.
+    private fun requireSoak() =
+        assumeTrue("set RIPPLE_SOAK=true to run soak tests", System.getenv("RIPPLE_SOAK") == "true")
 
     private data class Report(
         val seed: Long,
@@ -168,6 +174,7 @@ class Phase4SoakTest {
 
     @Test
     fun thirtyDaySoakAcrossSeedsProducesDistinctSocialLives() {
+        requireSoak()
         val reports = listOf(1924L, 7L, 42L).map { soak(it, 30) }
         reports.forEach { it.print() }
 
@@ -190,6 +197,7 @@ class Phase4SoakTest {
 
     @Test
     fun oneYearSoakHoldsInvariantsAndStaysAlive() {
+        requireSoak()
         val r = soak(1924L, 180)
         r.print()
         assertTrue("a year of life should hold conversations", r.conversations > 20)

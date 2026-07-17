@@ -10,6 +10,8 @@ import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.world.AshcroftLayout
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -20,6 +22,11 @@ import org.junit.Test
  */
 class Phase5SoakTest {
     private val engine = SimulationEngine(AshcroftLayout.build())
+
+    // Long-running validation: too slow for the shared CI runner, so it runs only
+    // when explicitly asked for (RIPPLE_SOAK=true) — locally, or in a dedicated lane.
+    @Before
+    fun soaksAreOptIn() = assumeTrue("set RIPPLE_SOAK=true to run soak tests", System.getenv("RIPPLE_SOAK") == "true")
 
     private data class Report(
         val seed: Long,
