@@ -2,6 +2,7 @@ package com.ashcroft.ripple.core.simulation
 
 import com.ashcroft.ripple.core.world.AshcroftLayout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,6 +58,28 @@ class Phase8LegibilityTest {
         assertTrue("A's view of B has a headline", view.aTowardB.headline.isNotBlank())
         assertTrue("B's view of A has a headline", view.bTowardA.headline.isNotBlank())
         assertTrue("the two directions are independent objects", view.aTowardB !== view.bTowardA)
+    }
+
+    @Test
+    fun departmentIdentityExplainsCharacterThroughEvidence() {
+        val state = engine.run(AshcroftScenario.initial(), 4 * 24 * 60)
+        val view = Legibility.departmentIdentity(state, com.ashcroft.ripple.core.model.Department.HOUSEKEEPING)
+        assertTrue("it is titled", view.title.isNotBlank())
+        if (view.settled) {
+            // Every trait is a grounded sentence, not a bare label.
+            assertTrue("character is explained, not labelled", view.character.all { it.sentence.contains("recorded moments") })
+        }
+        // The hotel as a whole also reads as an identity.
+        val hotel = Legibility.hotelIdentity(state)
+        assertTrue("the hotel has an identity card", hotel.title == "The Ashcroft" && hotel.observations >= 0)
+    }
+
+    @Test
+    fun anUnformedPlaceSaysSoRatherThanInventingCharacter() {
+        val fresh = AshcroftScenario.initial()
+        val view = Legibility.departmentIdentity(fresh, com.ashcroft.ripple.core.model.Department.BAR)
+        assertFalse("a day-zero department has not settled a character", view.settled)
+        assertTrue("and invents none", view.character.isEmpty())
     }
 
     @Test

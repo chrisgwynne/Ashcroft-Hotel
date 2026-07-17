@@ -1,9 +1,13 @@
 package com.ashcroft.ripple.core.simulation
 
+import com.ashcroft.ripple.core.model.Department
+import com.ashcroft.ripple.core.model.EntityId
+import com.ashcroft.ripple.core.model.EvidenceDimension
 import com.ashcroft.ripple.core.model.Person
 import com.ashcroft.ripple.core.model.PersonId
 import com.ashcroft.ripple.core.model.RelationDimension
 import com.ashcroft.ripple.core.model.RoleKind
+import com.ashcroft.ripple.core.model.department
 
 /** One observer's opinion of a subject, with how sure they are and whether they saw it firsthand. */
 data class ObserverOpinion(
@@ -52,6 +56,23 @@ data class RelationshipView(
     val bTowardA: DirectedFeeling,
     val differ: Boolean,
     val sharedContext: List<String>,
+)
+
+/** One strand of a place's character: a short label and the evidence-grounded sentence behind it. */
+data class IdentityTrait(val label: String, val sentence: String)
+
+/**
+ * A readable identity card for a place — its character explained through evidence,
+ * the customs it has grown into, and an honest note when nothing has settled yet.
+ * Never a bare label or a performance score.
+ */
+data class IdentityView(
+    val title: String,
+    val subtitle: String,
+    val settled: Boolean,
+    val character: List<IdentityTrait>,
+    val customs: List<String>,
+    val observations: Int,
 )
 
 /**
@@ -192,6 +213,76 @@ object Legibility {
             else -> "is low"
         }
     }
+
+    fun departmentIdentity(state: WorldState, dept: Department): IdentityView {
+        val entity = EntityId.department(dept)
+        val team = state.people.count { it.role.isStaff && it.role.department() == dept }
+        return identityOf(state, entity, "The ${dept.name.lowercase().replace('_', ' ')} team", "$team on the team")
+    }
+
+    fun hotelIdentity(state: WorldState): IdentityView =
+        identityOf(state, EntityId.HOTEL, "The Ashcroft", "the house as a whole")
+
+    /**
+     * Reads a place's culture into evidence-grounded prose: each characteristic trait
+     * becomes a sentence that says *what it is* and *what backs it up* — never a bare
+     * label. Customs it has grown into are listed in plain language. If no character
+     * has settled yet, it says so honestly rather than inventing one.
+     */
+    private fun identityOf(state: WorldState, entity: EntityId, title: String, subtitle: String): IdentityView {
+        val profile = state.culture.of(entity)
+        val pronounced = profile?.pronounced().orEmpty()
+        val character = pronounced.entries
+            .sortedByDescending { kotlin.math.abs(it.value.value) }
+            .map { (dimension, standing) ->
+                IdentityTrait(
+                    label = traitLabel(dimension, standing.value),
+                    sentence = "${traitLabel(dimension, standing.value).replaceFirstChar { it.uppercase() }} — " +
+                        "borne out across ${profile?.observations ?: 0} recorded moments here.",
+                )
+            }
+        val customs = state.practices.customary(entity).map { readableCustom(it) }
+        return IdentityView(
+            title = title,
+            subtitle = subtitle,
+            settled = pronounced.isNotEmpty(),
+            character = character,
+            customs = customs,
+            observations = profile?.observations ?: 0,
+        )
+    }
+
+    private fun traitLabel(dimension: EvidenceDimension, value: Double): String {
+        val pair = TRAIT_WORDS[dimension] ?: return dimension.name.lowercase()
+        return if (value >= 0.0) pair.first else pair.second
+    }
+
+    private fun readableCustom(descriptor: String): String {
+        val verb = descriptor.substringBefore('|').lowercase()
+        return when (verb) {
+            "work" -> "keeping steadily to the work"
+            "socialise" -> "gathering together off-shift"
+            "eat" -> "taking meals together"
+            "relax", "take_break" -> "sharing their breaks"
+            else -> verb
+        }
+    }
+
+    /** The adjective each culture axis reads as, positive and negative. */
+    private val TRAIT_WORDS: Map<EvidenceDimension, Pair<String, String>> = mapOf(
+        EvidenceDimension.RELIABILITY to ("reliable" to "unreliable"),
+        EvidenceDimension.COMPETENCE to ("capable" to "struggling"),
+        EvidenceDimension.WARMTH to ("warm and supportive" to "cool"),
+        EvidenceDimension.GENEROSITY to ("warm and supportive" to "cool"),
+        EvidenceDimension.RESPONSIVENESS to ("attentive" to "slow to respond"),
+        EvidenceDimension.DISCRETION to ("discreet" to "indiscreet"),
+        EvidenceDimension.CALMNESS to ("unflappable" to "prone to friction"),
+        EvidenceDimension.CLEANLINESS to ("immaculate" to "unkempt"),
+        EvidenceDimension.PRESTIGE to ("well regarded" to "overlooked"),
+        EvidenceDimension.CONSISTENCY to ("steady" to "erratic"),
+        EvidenceDimension.INNOVATION to ("inventive" to "set in its ways"),
+        EvidenceDimension.TRADITION to ("traditional" to "unceremonious"),
+    )
 
     private const val LIKED = 0.2
     private const val DISLIKED = -0.2
